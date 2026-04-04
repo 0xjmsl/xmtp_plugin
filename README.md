@@ -1,6 +1,6 @@
 # xmtp_plugin
 
-A Flutter plugin for [XMTP](https://xmtp.org) decentralized messaging. Send and receive messages, manage group conversations, handle consent, and stream incoming messages in real time across Android, iOS, macOS, Windows, and Web from a single Dart API.
+A Flutter plugin for [XMTP](https://xmtp.org) decentralized messaging. Send and receive messages, manage group conversations, handle consent, and stream incoming messages in real time across Android, iOS, Windows, and Web from a single Dart API.
 
 ## Platform Architecture
 
@@ -10,17 +10,16 @@ Each platform connects to the XMTP network through its own native implementation
 |----------|---------|-----------|
 | Android | [xmtp-android](https://github.com/xmtp/xmtp-android) SDK | Method Channel |
 | iOS | [xmtp-ios](https://github.com/xmtp/xmtp-ios) Swift SDK | Method Channel |
-| macOS | [xmtp-ios](https://github.com/xmtp/xmtp-ios) Swift SDK | Method Channel |
 | Windows | [libxmtp](https://github.com/xmtp/libxmtp) via Rust FFI | flutter_rust_bridge |
 | Web | [XMTP Browser SDK v5](https://github.com/xmtp/xmtp-js) | JavaScript Interop |
 
-On Android and iOS/macOS, Dart talks to the official XMTP native SDKs over a standard Flutter method channel. The native SDKs handle client creation, MLS group encryption, message encoding, and gRPC communication with the XMTP network.
+On Android and iOS, Dart talks to the official XMTP native SDKs over a standard Flutter method channel. The native SDKs handle client creation, MLS group encryption, message encoding, and gRPC communication with the XMTP network.
 
 On Windows, there is no official XMTP SDK for the platform. Instead, this plugin includes a Rust crate (`rust/`) that wraps `libxmtp` directly and exposes it to Dart through [flutter_rust_bridge](https://github.com/aspect-build/flutter_rust_bridge). The Rust code compiles to a native DLL via [Corrosion](https://github.com/aspect-build/corrosion) (integrated in the Windows CMakeLists.txt), and Dart calls into it using FFI. This bypasses the C++ method channel entirely: Dart calls Rust functions directly, Rust talks to libxmtp, and libxmtp handles the protocol. The bridge code is auto-generated from the Rust API modules by running `flutter_rust_bridge_codegen generate`.
 
 On Web, Dart uses `dart:js_interop` to call a JavaScript facade (`web/xmtp_client_manager.js`) that wraps the XMTP Browser SDK v5. The Browser SDK handles client creation, IndexedDB persistence, and WebSocket streaming.
 
-All five platform implementations conform to the same `XmtpPluginPlatform` interface, so your application code is identical regardless of where it runs.
+All four platform implementations conform to the same `XmtpPluginPlatform` interface, so your application code is identical regardless of where it runs.
 
 ## Features
 
@@ -77,9 +76,9 @@ Add the XMTP Android SDK dependency. The plugin's `android/build.gradle` already
 
 Minimum SDK: 21.
 
-### iOS / macOS
+### iOS
 
-The plugin depends on the XMTP Swift SDK via CocoaPods (`XMTP ~> 4.0`). Run `pod install` in your ios/ or macos/ directory. Minimum iOS 14.0.
+The plugin depends on the XMTP Swift SDK via CocoaPods (`XMTP ~> 4.0`). Run `pod install` in your ios/ directory. Minimum iOS 14.0.
 
 ### Windows
 
@@ -424,11 +423,9 @@ lib/
 
 android/    Kotlin plugin (wraps xmtp-android SDK)
 ios/        Swift plugin (wraps XMTP iOS SDK)
-macos/      Swift plugin (shares iOS implementation)
 windows/    CMake config (builds Rust crate via Corrosion)
-linux/      C++ plugin (placeholder)
 web/        JavaScript bridge to XMTP Browser SDK v5
-rust/       Rust FFI crate wrapping libxmtp (Windows/Linux)
+rust/       Rust FFI crate wrapping libxmtp (Windows)
 proto/      Protobuf definitions for custom content types
 ```
 
@@ -438,7 +435,6 @@ proto/      Protobuf definitions for custom content types
 |----------|---------|-------------|
 | Android | API 21 | xmtp-android 4.7.0 |
 | iOS | 14.0 | XMTP Swift 4.0 |
-| macOS | 10.11 | XMTP Swift 4.0 |
 | Windows | 10+ | Rust stable, CMake 3.14 |
 | Web | Modern browsers | XMTP Browser SDK 5.0 |
 | Flutter | 3.3.0+ | Dart SDK 3.5.4+ |
@@ -468,10 +464,6 @@ The suite creates ephemeral keys for three accounts (Alice, Bob, Charlie), regis
 ## Known Limitations
 
 **History sync** across installations (e.g. syncing conversations from one device to another via `sendSyncRequest`) is not reliable. The `sendSyncRequest` and `syncAll` APIs are available but conversation transfer may not complete. Do not depend on cross-installation sync for critical flows.
-
-**macOS** has a stub plugin registered but no XMTP SDK integration yet. The iOS Swift implementation can be shared but the CocoaPods dependency needs adjusting for macOS.
-
-**Linux** has a placeholder C++ plugin. It would need the same Rust FFI approach as Windows to work.
 
 **One client at a time.** The plugin uses a singleton client internally. Initializing a new client replaces the previous one. To switch between accounts, call `initializeClient` again with different keys.
 

@@ -1,3 +1,9 @@
+## 1.0.1
+
+* Removed untested macOS and Linux platform declarations
+* Fixed lint warnings (unused imports, missing @override annotations, unnecessary type checks)
+* Added .gitignore, removed generated files from tracking
+
 ## 1.0.0
 
 * Initial release
@@ -9,4 +15,4 @@
 * Group operations: create, update metadata, manage members and admin roles
 * Inbox management: installations, account linking, recovery identity
 * History sync across devices
-* Platform support: Android (xmtp-android SDK), iOS/macOS (XMTP Swift SDK), Windows (Rust FFI via libxmtp), Web (XMTP Browser SDK v5)
+* Platform support: Android (xmtp-android SDK), iOS (XMTP Swift SDK), Windows (Rust FFI via libxmtp), Web (XMTP Browser SDK v5)
