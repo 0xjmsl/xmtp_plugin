@@ -1,0 +1,8 @@
+.dart_tool/
+.packages
+build/
+pubspec.lock
+example/pubspec.lock
+test_app/pubspec.lock
+test_app/build/
+*.iml
