@@ -1,0 +1,11 @@
+{
+  "name": "xmtp-flutter-web",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@xmtp/browser-sdk": "^5.0.1",
+    "@xmtp/content-type-text": "^2.0.2",
+    "@xmtp/content-type-primitives": "^2.0.2",
+    "@xmtp/content-type-group-updated": "^2.0.2"
+  }
+}

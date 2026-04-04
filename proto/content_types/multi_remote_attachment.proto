@@ -1,0 +1,22 @@
+// multi_remote_attachment.proto
+// ContentTypeId { authority_id: "xmtp.org", type_id: "multiRemoteStaticContent", version: 1.0 }
+syntax = "proto3";
+
+package xmtp.mls.message_contents.content_types;
+
+option java_package = "org.xmtp.proto.mls.message_contents.content_types";
+
+message MultiRemoteAttachment {
+  repeated RemoteAttachmentInfo attachments = 1;
+}
+
+message RemoteAttachmentInfo {
+  string content_digest = 1;
+  bytes secret = 2;
+  bytes nonce = 3;
+  bytes salt = 4;
+  string scheme = 5;
+  string url = 6;
+  optional uint32 content_length = 7;
+  optional string filename = 8;
+}

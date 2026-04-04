@@ -1,0 +1,8 @@
+.claude/
+.vscode/
+.idea/
+rust/target/
+rust/deps/hpke-rs/.git/
+web/node_modules/
+example/android/local.properties
+*.lock

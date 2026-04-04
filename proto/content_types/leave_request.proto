@@ -1,0 +1,11 @@
+// leave_request.proto
+// ContentTypeId { authority_id: "xmtp.org", type_id: "leaveRequest", version: 1.0 }
+syntax = "proto3";
+
+package xmtp.mls.message_contents.content_types;
+
+option java_package = "org.xmtp.proto.mls.message_contents.content_types";
+
+message LeaveRequest {
+  optional bytes authenticated_note = 1;
+}

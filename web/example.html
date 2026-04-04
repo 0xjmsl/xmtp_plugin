@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XMTP Flutter Web Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>XMTP Flutter Web Implementation Demo</h1>
+
+    <div class="section">
+        <h2>Client Management</h2>
+        <button onclick="generatePrivateKey()">Generate Private Key</button>
+        <button onclick="initializeClient()">Initialize Client</button>
+        <button onclick="getClientAddress()">Get Client Address</button>
+        <button onclick="getClientInboxId()">Get Client Inbox ID</button>
+    </div>
+
+    <div class="section">
+        <h2>Messaging</h2>
+        <input type="text" id="recipientAddress" placeholder="Recipient Address" />
+        <textarea id="messageContent" placeholder="Message content" rows="3"></textarea>
+        <br>
+        <button onclick="sendMessage()">Send Message</button>
+        <button onclick="subscribeToMessages()">Subscribe to Messages</button>
+    </div>
+
+    <div class="section">
+        <h2>Conversations</h2>
+        <button onclick="listConversations()">List Conversations</button>
+        <button onclick="listDms()">List DMs</button>
+        <button onclick="listGroups()">List Groups</button>
+    </div>
+
+    <div class="section">
+        <h2>Groups</h2>
+        <input type="text" id="groupInboxIds" placeholder="Inbox IDs (comma separated)" />
+        <input type="text" id="groupName" placeholder="Group Name" />
+        <br>
+        <button onclick="createGroup()">Create Group</button>
+    </div>
+
+    <div class="section">
+        <h2>Log</h2>
+        <div id="log" class="log"></div>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <!-- Import XMTP Client Manager -->
+    <script type="module" src="./xmtp_client_manager.js"></script>
+
+    <script>
+        let privateKey = null;
+        let clientAddress = null;
+
+        // Logging function
+        function log(message) {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        // Wait for XMTP client manager to be available
+        function waitForXMTP() {
+            return new Promise((resolve) => {
+                const checkInterval = setInterval(() => {
+                    if (window.xmtpClientManager) {
+                        clearInterval(checkInterval);
+                        resolve();
+                    }
+                }, 100);
+            });
+        }
+
+        // Client Management Functions
+        async function generatePrivateKey() {
+            try {
+                await waitForXMTP();
+                privateKey = await window.xmtpClientManager.generatePrivateKey();
+                log(`Generated private key: ${privateKey.slice(0, 8)}...`);
+            } catch (error) {
+                log(`Error generating private key: ${error.message}`);
+            }
+        }
+
+        async function initializeClient() {
+            try {
+                if (!privateKey) {
+                    log('Please generate a private key first');
+                    return;
+                }
+
+                await waitForXMTP();
+                const dbKey = crypto.getRandomValues(new Uint8Array(32));
+                clientAddress = await window.xmtpClientManager.initializeClient({
+                    privateKey: privateKey,
+                    dbKey: Array.from(dbKey)
+                });
+                log(`Client initialized with address: ${clientAddress}`);
+            } catch (error) {
+                log(`Error initializing client: ${error.message}`);
+            }
+        }
+
+        async function getClientAddress() {
+            try {
+                await waitForXMTP();
+                const address = await window.xmtpClientManager.getClientAddress();
+                log(`Client address: ${address}`);
+            } catch (error) {
+                log(`Error getting client address: ${error.message}`);
+            }
+        }
+
+        async function getClientInboxId() {
+            try {
+                await waitForXMTP();
+                const inboxId = await window.xmtpClientManager.getClientInboxId();
+                log(`Client inbox ID: ${inboxId}`);
+            } catch (error) {
+                log(`Error getting client inbox ID: ${error.message}`);
+            }
+        }
+
+        // Messaging Functions
+        async function sendMessage() {
+            try {
+                const recipientAddress = document.getElementById('recipientAddress').value;
+                const messageContent = document.getElementById('messageContent').value;
+
+                if (!recipientAddress || !messageContent) {
+                    log('Please enter recipient address and message content');
+                    return;
+                }
+
+                await waitForXMTP();
+                const messageId = await window.xmtpClientManager.sendMessage({
+                    recipientAddress: recipientAddress,
+                    message: { content: messageContent },
+                    authorityId: 'xmtp.org',
+                    typeId: 'text',
+                    versionMajor: '1'
+                });
+                log(`Message sent with ID: ${messageId}`);
+            } catch (error) {
+                log(`Error sending message: ${error.message}`);
+            }
+        }
+
+        async function subscribeToMessages() {
+            try {
+                await waitForXMTP();
+
+                // Set up message callback
+                window.onXmtpMessage = function(messageData) {
+                    log(`Received message: ${JSON.stringify(messageData, null, 2)}`);
+                };
+
+                await window.xmtpClientManager.subscribeToAllMessages();
+                log('Subscribed to all messages');
+            } catch (error) {
+                log(`Error subscribing to messages: ${error.message}`);
+            }
+        }
+
+        // Conversation Functions
+        async function listConversations() {
+            try {
+                await waitForXMTP();
+                const conversations = await window.xmtpClientManager.listConversations();
+                log(`Conversations: ${JSON.stringify(conversations, null, 2)}`);
+            } catch (error) {
+                log(`Error listing conversations: ${error.message}`);
+            }
+        }
+
+        async function listDms() {
+            try {
+                await waitForXMTP();
+                const dms = await window.xmtpClientManager.listDms();
+                log(`DMs: ${JSON.stringify(dms, null, 2)}`);
+            } catch (error) {
+                log(`Error listing DMs: ${error.message}`);
+            }
+        }
+
+        async function listGroups() {
+            try {
+                await waitForXMTP();
+                const groups = await window.xmtpClientManager.listGroups();
+                log(`Groups: ${JSON.stringify(groups, null, 2)}`);
+            } catch (error) {
+                log(`Error listing groups: ${error.message}`);
+            }
+        }
+
+        // Group Functions
+        async function createGroup() {
+            try {
+                const inboxIdsInput = document.getElementById('groupInboxIds').value;
+                const groupName = document.getElementById('groupName').value;
+
+                if (!inboxIdsInput || !groupName) {
+                    log('Please enter inbox IDs and group name');
+                    return;
+                }
+
+                const inboxIds = inboxIdsInput.split(',').map(id => id.trim());
+
+                await waitForXMTP();
+                const group = await window.xmtpClientManager.newGroup({
+                    inboxIds: inboxIds,
+                    options: { name: groupName }
+                });
+                log(`Group created: ${JSON.stringify(group, null, 2)}`);
+            } catch (error) {
+                log(`Error creating group: ${error.message}`);
+            }
+        }
+
+        // Initialize the page
+        window.addEventListener('load', () => {
+            log('XMTP Flutter Web Demo loaded');
+            log('Click "Generate Private Key" to start');
+        });
+    </script>
+</body>
+</html>
