@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 import 'package:pointycastle/export.dart';
@@ -10,7 +9,6 @@ import 'package:xmtp_plugin/generated/mls/message_contents/transcript_messages.p
 import 'package:xmtp_plugin/generated/content_types/delete_message.pb.dart' as proto_delete;
 import 'package:xmtp_plugin/generated/content_types/leave_request.pb.dart' as proto_leave;
 import 'package:xmtp_plugin/generated/content_types/multi_remote_attachment.pb.dart' as proto_multi;
-import 'package:xmtp_plugin/xmtp_plugin.dart';
 
 // Export GroupUpdated for external use
 export 'package:xmtp_plugin/generated/mls/message_contents/transcript_messages.pb.dart' show GroupUpdated, GroupUpdated_Inbox, GroupUpdated_MetadataFieldChange;

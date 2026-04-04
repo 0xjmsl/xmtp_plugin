@@ -210,7 +210,7 @@ void main() {
     // --- Alice Device 1 ---
     print('\n--- Alice Device 1 ---');
     await xmtp.initializeClient(alicePk, randomDbKey());
-    final aliceInboxId = await xmtp.getClientInboxId();
+    await xmtp.getClientInboxId();
     final aliceAddress = await xmtp.getClientAddress();
     final installId1 = await xmtp.getInstallationId();
     print('Alice D1: address=$aliceAddress, install=${installId1.substring(0, 16)}...');

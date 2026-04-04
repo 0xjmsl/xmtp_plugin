@@ -262,14 +262,7 @@ class XmtpPlugin {
   Future<List<Map<String, dynamic>>> listConversations() async {
     final List<Map<String, dynamic>> result = await _platform.listConversations();
 
-    return result.map((item) {
-      if (item is Map) {
-        return Map<String, dynamic>.from(item);
-      } else {
-        print('Unexpected type in listConversations result: ${item.runtimeType}');
-        return <String, dynamic>{};
-      }
-    }).toList();
+    return result.map((item) => Map<String, dynamic>.from(item)).toList();
   }
 
   Future<bool> sendSyncRequest() async {
@@ -287,27 +280,13 @@ class XmtpPlugin {
   Future<List<Map<String, dynamic>>> listDms({String? consentState}) async {
     final List<Map<String, dynamic>> result = await _platform.listDms(consentState: consentState);
 
-    return result.map((item) {
-      if (item is Map) {
-        return Map<String, dynamic>.from(item);
-      } else {
-        print('Unexpected type in listDms result: ${item.runtimeType}');
-        return <String, dynamic>{};
-      }
-    }).toList();
+    return result.map((item) => Map<String, dynamic>.from(item)).toList();
   }
 
   Future<List<Map<String, dynamic>>> listGroups({String? consentState}) async {
     final List<Map<String, dynamic>> result = await _platform.listGroups(consentState: consentState);
 
-    return result.map((item) {
-      if (item is Map) {
-        return Map<String, dynamic>.from(item);
-      } else {
-        print('Unexpected type in listGroups result: ${item.runtimeType}');
-        return <String, dynamic>{};
-      }
-    }).toList();
+    return result.map((item) => Map<String, dynamic>.from(item)).toList();
   }
 
   Future<Map<String, dynamic>> newGroup(List<String> inboxIds, Map<String, String> options) async {

@@ -80,6 +80,7 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
   // Ephemeral keys for three accounts + one extra for addAccount test
   late Uint8List _aliceKey, _bobKey, _charlieKey, _alice2Key;
   late Uint8List _aliceDb, _bobDb, _charlieDb, _alice2Db;
+  // ignore: unused_field
   String _aliceAddress = '', _bobAddress = '', _charlieAddress = '';
   String _aliceInboxId = '', _bobInboxId = '', _charlieInboxId = '';
   String _dmTopic = '';

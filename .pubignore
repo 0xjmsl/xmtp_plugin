@@ -5,4 +5,5 @@ rust/target/
 rust/deps/hpke-rs/.git/
 web/node_modules/
 example/android/local.properties
+test_app/
 *.lock

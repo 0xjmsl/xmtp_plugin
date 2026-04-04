@@ -443,9 +443,11 @@ proto/      Protobuf definitions for custom content types
 | Web | Modern browsers | XMTP Browser SDK 5.0 |
 | Flutter | 3.3.0+ | Dart SDK 3.5.4+ |
 
-## Running the Test App
+## Test App
 
-The `test_app/` directory contains a Windows Flutter app that runs a full integration test suite against the XMTP dev network. It auto-runs on launch and writes results to a log file.
+The [GitHub repository](https://github.com/0xjmsl/xmtp_plugin) includes a `test_app/` directory with a Flutter integration test suite that runs 21 steps against the XMTP dev network: ephemeral key generation, client registration, DMs, group creation with metadata, cross-account message verification, addAccount identity linking, and inbox ID checks. Currently configured for Windows but the test logic is pure Dart and portable to Android/iOS.
+
+The test app is not included in the pub.dev package. Clone the repo to run it:
 
 ```powershell
 cd test_app

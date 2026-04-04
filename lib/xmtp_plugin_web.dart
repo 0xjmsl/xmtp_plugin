@@ -668,6 +668,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   // ============================================================================
 
   /// Get consent state for a conversation by topic
+  @override
   Future<String> getConversationConsentState(String topic) async {
     try {
       final params = <String, dynamic>{
@@ -685,6 +686,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Set consent state for a conversation by topic
+  @override
   Future<bool> setConversationConsentState(String topic, String state) async {
     try {
       final params = <String, dynamic>{
@@ -703,6 +705,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Get consent state for an inbox by inbox ID
+  @override
   Future<String> getInboxConsentState(String inboxId) async {
     try {
       final params = <String, dynamic>{
@@ -720,6 +723,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Set consent state for an inbox by inbox ID
+  @override
   Future<bool> setInboxConsentState(String inboxId, String state) async {
     try {
       final params = <String, dynamic>{
@@ -738,6 +742,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Sync consent preferences from network
+  @override
   Future<bool> syncConsentPreferences() async {
     try {
       await _promiseToFuture(
@@ -756,6 +761,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
 
   /// Send a sync request to trigger history transfer from other installations.
   /// This is the manual trigger for XMTP history sync across devices.
+  @override
   Future<bool> sendSyncRequest() async {
     try {
       await _promiseToFuture(
@@ -769,6 +775,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Sync all conversations from network
+  @override
   Future<Map<String, int>> syncAll({List<String> consentStates = const ['allowed']}) async {
     try {
       final params = <String, dynamic>{
@@ -787,6 +794,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Sync a single conversation by topic
+  @override
   Future<void> syncConversation(String topic) async {
     try {
       final params = <String, dynamic>{
@@ -819,6 +827,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Check if can message by inbox ID
+  @override
   Future<bool> canMessageByInboxId(String inboxId) async {
     try {
       final params = <String, dynamic>{
@@ -840,6 +849,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   // ============================================================================
 
   /// Get current installation ID
+  @override
   Future<String> getInstallationId() async {
     try {
       final result = await _promiseToFuture(
@@ -853,6 +863,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Get inbox state for current client
+  @override
   Future<Map<String, dynamic>> inboxState({bool refreshFromNetwork = false}) async {
     try {
       final params = <String, dynamic>{
@@ -870,6 +881,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Revoke specific installations
+  @override
   Future<void> revokeInstallations(Uint8List signerPrivateKey, List<String> installationIds) async {
     try {
       final params = <String, dynamic>{
@@ -886,6 +898,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Revoke all other installations
+  @override
   Future<void> revokeAllOtherInstallations(Uint8List signerPrivateKey) async {
     try {
       final params = <String, dynamic>{
@@ -901,6 +914,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Add a new account to the inbox
+  @override
   Future<void> addAccount(Uint8List newAccountPrivateKey, {bool allowReassignInboxId = false}) async {
     try {
       final params = <String, dynamic>{
@@ -917,6 +931,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Remove an account from the inbox
+  @override
   Future<void> removeAccount(Uint8List recoveryPrivateKey, String identifierToRemove) async {
     try {
       final params = <String, dynamic>{
@@ -933,6 +948,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   /// Change recovery identifier
+  @override
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) async {
     try {
       final params = <String, dynamic>{
