@@ -1,3 +1,8 @@
+## 1.0.2
+
+* Clarified Windows setup: DLL is not included in pub.dev package, clone repo + build + copy workflow documented
+* Updated README and START_HERE with explicit per-platform instructions
+
 ## 1.0.1
 
 * Removed untested macOS and Linux platform declarations

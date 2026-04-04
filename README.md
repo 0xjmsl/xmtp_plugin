@@ -82,47 +82,45 @@ The plugin depends on the XMTP Swift SDK via CocoaPods (`XMTP ~> 4.0`). Run `pod
 
 ### Windows
 
-The Windows implementation uses a Rust crate that wraps libxmtp and exposes it to Dart through flutter_rust_bridge. This produces a native DLL that must be present next to the Flutter app executable at runtime.
+Windows support requires a native DLL (`xmtp_plugin_native.dll`) built from the Rust crate in this repository. The pub.dev package includes the Dart FFI bindings but **not** the pre-built DLL — you need to clone the repo and build it yourself.
 
-**Requirements:**
+**Step 1: Clone the repository**
+
+```powershell
+git clone https://github.com/0xjmsl/xmtp_plugin.git
+```
+
+**Step 2: Install build requirements**
 
 1. Rust toolchain (`rustup` with stable channel)
 2. Visual Studio with C++ build tools and ATL headers (Individual Components: "C++ ATL for latest v143 build tools")
 3. CMake 3.14+
 4. Strawberry Perl (required by some Rust crypto dependencies)
 
-**First build takes 6+ minutes** because Cargo compiles the entire libxmtp dependency tree (500+ crates). Subsequent incremental builds are fast.
-
-**Building the DLL:**
+**Step 3: Build the DLL**
 
 ```powershell
-cd rust
+cd xmtp_plugin/rust
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-This outputs `rust/target/debug/xmtp_plugin_native.dll` (~58MB debug).
+First build takes 6+ minutes (500+ crates). Subsequent builds are fast. This outputs `rust/target/debug/xmtp_plugin_native.dll` (~58MB debug).
 
-**Deploying the DLL:** The DLL must be copied to the Flutter runner directory. Corrosion in CMakeLists.txt is configured to do this automatically during `flutter build`, but in practice you may need to copy it manually:
+**Step 4: Copy the DLL next to your app executable**
 
 ```powershell
 # For debug builds (flutter run)
-Copy-Item 'rust/target/debug/xmtp_plugin_native.dll' '<your_app>/build/windows/x64/runner/Debug/'
+Copy-Item 'xmtp_plugin/rust/target/debug/xmtp_plugin_native.dll' '<your_app>/build/windows/x64/runner/Debug/'
 
 # For release builds (flutter build windows)
-Copy-Item 'rust/target/release/xmtp_plugin_native.dll' '<your_app>/build/windows/x64/runner/Release/'
+Copy-Item 'xmtp_plugin/rust/target/release/xmtp_plugin_native.dll' '<your_app>/build/windows/x64/runner/Release/'
 ```
 
-If the DLL is missing or is a small stub (<1MB), the app will crash on launch with no clear error. Rebuild with `cargo build` if this happens.
+If the DLL is missing, the app crashes on launch with no clear error. If the DLL is <1MB it's a stale stub — rebuild with `cargo build`.
 
-**flutter_rust_bridge version:** The Dart package version and the Rust crate version must match exactly. Both are pinned to `2.11.1`. Using `^2.11.1` in pubspec.yaml may resolve to a newer version and cause a "codegen version mismatch" crash at runtime. Pin it with `flutter_rust_bridge: 2.11.1` (no caret).
+**Important:** Kill any running instance of your app before rebuilding. The linker cannot overwrite the exe while the process is running (LNK1168 error).
 
-**Rebuilding the FFI bridge** after modifying `rust/src/api/*.rs`:
-
-```bash
-flutter_rust_bridge_codegen generate
-```
-
-**Note:** Kill any running instance of your app before rebuilding. The linker cannot overwrite the exe while the process is running (LNK1168 error).
+**flutter_rust_bridge version:** Both Dart and Rust sides are pinned to `2.11.1`. Use `flutter_rust_bridge: 2.11.1` (no caret) in your app's pubspec.yaml. A version mismatch causes a "codegen version mismatch" crash at runtime.
 
 ### Web
 

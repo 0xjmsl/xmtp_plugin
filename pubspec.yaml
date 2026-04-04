@@ -1,6 +1,6 @@
 name: xmtp_plugin
 description: "A Flutter plugin for XMTP decentralized messaging. Supports DMs, group chats, content codecs, consent management, and real-time streaming across Android, iOS, Windows, and Web."
-version: 1.0.1
+version: 1.0.2
 homepage: https://github.com/0xjmsl/xmtp_plugin
 repository: https://github.com/0xjmsl/xmtp_plugin
 issue_tracker: https://github.com/0xjmsl/xmtp_plugin/issues

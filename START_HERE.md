@@ -74,17 +74,12 @@ flutter run -d windows                    # auto-runs tests, writes to %TEMP%/xm
 
 ## Windows DLL Deployment (Critical)
 
-The Rust DLL (`xmtp_plugin_native.dll`, ~58MB) must be next to the app executable.
+The pub.dev package does **not** include a pre-built DLL. Consumers of the package on Windows must clone this repo, build the Rust crate, and copy the DLL next to their app executable. See the README for the full step-by-step.
 
-- `flutter run` builds **Debug** -> DLL goes in `build/windows/x64/runner/Debug/`
-- `flutter build windows` builds **Release** -> DLL goes in `build/windows/x64/runner/Release/`
+- Debug DLL: `rust/target/debug/xmtp_plugin_native.dll` → `<app>/build/windows/x64/runner/Debug/`
+- Release DLL: `rust/target/release/xmtp_plugin_native.dll` → `<app>/build/windows/x64/runner/Release/`
 
-If the DLL is missing, the app crashes immediately with no clear error.
-
-```powershell
-# After building the Rust crate
-Copy-Item 'rust/target/debug/xmtp_plugin_native.dll' '<app>/build/windows/x64/runner/Debug/'
-```
+If the DLL is missing, the app crashes immediately with no clear error. If it's <1MB it's a stale CMake stub — rebuild with `cargo build`.
 
 ## Gotchas
 
