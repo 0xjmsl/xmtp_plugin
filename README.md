@@ -11,13 +11,13 @@ Each platform connects to the XMTP network through its own native implementation
 | Android | [xmtp-android](https://github.com/xmtp/xmtp-android) SDK | Method Channel |
 | iOS | [xmtp-ios](https://github.com/xmtp/xmtp-ios) Swift SDK | Method Channel |
 | Windows | [libxmtp](https://github.com/xmtp/libxmtp) via Rust FFI | flutter_rust_bridge |
-| Web | [XMTP Browser SDK v5](https://github.com/xmtp/xmtp-js) | JavaScript Interop |
+| Web | [XMTP Browser SDK v6](https://github.com/xmtp/xmtp-js) | JavaScript Interop |
 
 On Android and iOS, Dart talks to the official XMTP native SDKs over a standard Flutter method channel. The native SDKs handle client creation, MLS group encryption, message encoding, and gRPC communication with the XMTP network.
 
 On Windows, there is no official XMTP SDK for the platform. Instead, this plugin includes a Rust crate (`rust/`) that wraps `libxmtp` directly and exposes it to Dart through [flutter_rust_bridge](https://github.com/aspect-build/flutter_rust_bridge). The Rust code compiles to a native DLL via [Corrosion](https://github.com/aspect-build/corrosion) (integrated in the Windows CMakeLists.txt), and Dart calls into it using FFI. This bypasses the C++ method channel entirely: Dart calls Rust functions directly, Rust talks to libxmtp, and libxmtp handles the protocol. The bridge code is auto-generated from the Rust API modules by running `flutter_rust_bridge_codegen generate`.
 
-On Web, Dart uses `dart:js_interop` to call a JavaScript facade (`web/xmtp_client_manager.js`) that wraps the XMTP Browser SDK v5. The Browser SDK handles client creation, IndexedDB persistence, and WebSocket streaming.
+On Web, Dart uses `dart:js_interop` to call a JavaScript facade (`web/xmtp_client_manager.js`) that wraps the XMTP Browser SDK v6. The Browser SDK runs XMTP's WASM bindings inside a Web Worker, with SQLite persistence via the browser's Origin Private File System (OPFS).
 
 All four platform implementations conform to the same `XmtpPluginPlatform` interface, so your application code is identical regardless of where it runs.
 
@@ -63,7 +63,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xmtp_plugin: ^1.0.0
+  xmtp_plugin: ^1.0.3
 ```
 
 ### Android
@@ -74,7 +74,7 @@ Add the XMTP Android SDK dependency. The plugin's `android/build.gradle` already
 <uses-permission android:name="android.permission.INTERNET" />
 ```
 
-Minimum SDK: 21.
+Minimum SDK: 21. Requires NDK 27.0.12077973 — set `ndkVersion = "27.0.12077973"` in your app's `android/app/build.gradle.kts`.
 
 ### iOS
 
@@ -124,16 +124,36 @@ If the DLL is missing, the app crashes on launch with no clear error. If the DLL
 
 ### Web
 
+Web requires building the JavaScript bundle from the plugin's `web/` directory and placing it in your app's `web/` folder.
+
+**Step 1: Build the bundle**
+
 ```bash
-cd web
+cd <path-to-xmtp_plugin>/web
 npm install
+npx vite build
 ```
 
-Include the JavaScript manager in your `web/index.html` before the Flutter bootstrap:
+This produces a `dist/` folder containing the bundle (~163KB JS), Web Worker scripts, and the XMTP WASM binary (~11MB).
+
+**Step 2: Copy to your app**
+
+```bash
+cp -r dist/ <your_app>/web/xmtp/
+```
+
+**Step 3: Add the script tag** in your `web/index.html` before the Flutter bootstrap:
 
 ```html
-<script type="module" src="xmtp_client_manager.js"></script>
+<script type="module" src="xmtp/xmtp_bundle.js"></script>
 ```
+
+**Web limitations:**
+
+- **No persistent key storage.** OPFS databases survive page reloads but are tied to the browser origin. Private browsing, clearing site data, or switching browsers loses all state. Your app must handle key backup/restore.
+- **Single tab only.** The XMTP WASM bindings use OPFS with a SyncAccessHandle Pool VFS that does not support multiple simultaneous connections. Running your app in multiple tabs will cause database errors.
+- **One client at a time.** Re-initializing with a different key properly closes the previous client (terminates the Web Worker and releases OPFS handles). But you cannot run two XMTP clients simultaneously.
+- **Group names via `newGroup` options** may appear blank due to a Dart `jsify()` interop limitation with nested Maps. Group functionality works correctly otherwise.
 
 ## Quick Start
 
@@ -422,7 +442,7 @@ lib/
 android/    Kotlin plugin (wraps xmtp-android SDK)
 ios/        Swift plugin (wraps XMTP iOS SDK)
 windows/    CMake config (builds Rust crate via Corrosion)
-web/        JavaScript bridge to XMTP Browser SDK v5
+web/        JavaScript bridge to XMTP Browser SDK v6 (Vite build)
 rust/       Rust FFI crate wrapping libxmtp (Windows)
 proto/      Protobuf definitions for custom content types
 ```
@@ -434,36 +454,45 @@ proto/      Protobuf definitions for custom content types
 | Android | API 21 | xmtp-android 4.7.0 |
 | iOS | 14.0 | XMTP Swift 4.0 |
 | Windows | 10+ | Rust stable, CMake 3.14 |
-| Web | Modern browsers | XMTP Browser SDK 5.0 |
+| Web | Modern browsers (OPFS support) | XMTP Browser SDK 6.x |
 | Flutter | 3.3.0+ | Dart SDK 3.5.4+ |
 
 ## Test App
 
-The [GitHub repository](https://github.com/0xjmsl/xmtp_plugin) includes a `test_app/` directory with a Flutter integration test suite that runs 21 steps against the XMTP dev network: ephemeral key generation, client registration, DMs, group creation with metadata, cross-account message verification, addAccount identity linking, and inbox ID checks. Currently configured for Windows but the test logic is pure Dart and portable to Android/iOS.
+The [GitHub repository](https://github.com/0xjmsl/xmtp_plugin) includes a `test_app/` directory with a Flutter integration test suite that runs 22 steps against the XMTP dev network. The same test app runs on **Web, Windows, and Android** from a single codebase.
 
-The test app is not included in the pub.dev package. Clone the repo to run it:
+```bash
+# Web
+flutter run -d chrome
 
-```powershell
-cd test_app
-flutter pub get
+# Windows (requires DLL, see Windows setup above)
 flutter run -d windows
+
+# Android
+flutter run -d <device>
 ```
 
-The DLL must be in the Debug runner directory. After building the Rust crate:
+For **Windows**, the DLL must be in the Debug runner directory. After building the Rust crate:
 
 ```powershell
 Copy-Item '..\rust\target\debug\xmtp_plugin_native.dll' 'build\windows\x64\runner\Debug\'
 ```
 
-Results are written to `%TEMP%/xmtp_test_results.log` so they can be checked without interacting with the GUI.
+For **Web**, the XMTP bundle must be built and copied first (see Web setup above).
 
-The suite creates ephemeral keys for three accounts (Alice, Bob, Charlie), registers them on the dev network, tests DMs, group creation with metadata, message sending and receiving across accounts, addAccount identity linking, and inbox ID verification. All 21 steps run in about 35 seconds.
+The suite creates ephemeral keys for three accounts (Alice, Bob, Charlie), registers them on the dev network, and tests: DMs, group creation with metadata, message sending and receiving across accounts, conversation sync and discovery, addAccount identity linking, inbox state verification, and shared inbox confirmation. Results are written to a log file on native platforms.
 
 ## Known Limitations
 
 **History sync** across installations (e.g. syncing conversations from one device to another via `sendSyncRequest`) is not reliable. The `sendSyncRequest` and `syncAll` APIs are available but conversation transfer may not complete. Do not depend on cross-installation sync for critical flows.
 
 **One client at a time.** The plugin uses a singleton client internally. Initializing a new client replaces the previous one. To switch between accounts, call `initializeClient` again with different keys.
+
+**Web: No persistent key storage.** Browser databases (OPFS) persist across page reloads within the same origin, but clearing site data, private browsing, or switching browsers loses all state. Your app is responsible for key backup and restore.
+
+**Web: Single tab restriction.** The XMTP WASM bindings use OPFS with a VFS that does not support multiple simultaneous connections. Multiple tabs accessing the same app will cause database errors.
+
+**Web: Database encryption key must match per inbox.** When re-initializing a client for the same inbox (e.g., after `addAccount`), use the same `dbKey`. A mismatched key causes a SQLCipher error. This applies to all platforms but is especially relevant on web where OPFS databases persist.
 
 ## License
 
