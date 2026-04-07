@@ -1,11 +1,13 @@
 /**
- * XMTP Client Manager for Flutter Web - SDK v5.x
+ * XMTP Client Manager for Flutter Web - SDK v6.x
  *
  * This module provides a comprehensive JavaScript bridge between Flutter Web
- * and the XMTP Browser SDK v5, implementing all methods from the Flutter platform interface.
+ * and the XMTP Browser SDK v6, implementing all methods from the Flutter platform interface.
  */
 
-import { Client } from '@xmtp/browser-sdk';
+import { Client, ConsentState, ConsentEntityType, ConversationType, IdentifierKind } from '@xmtp/browser-sdk';
+import { toBytes } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 
 /**
  * Singleton manager for XMTP client operations
@@ -51,8 +53,16 @@ class XMTPClientManager {
   async initializeClient({ privateKey, dbKey, environment = 'production' }) {
     try {
       if (this.#client) {
-        console.warn('[XMTP] Client already initialized');
-        return this.#client.inboxId;
+        console.log('[XMTP] Closing existing client before re-init...');
+        // Clean up active streams
+        for (const stream of this.#activeStreams) {
+          try { stream.end?.(); } catch (_) {}
+        }
+        this.#activeStreams.clear();
+        this.#messageCallbacks.clear();
+        // Properly close the client (terminates the Web Worker and releases OPFS handles)
+        try { this.#client.close(); } catch (_) {}
+        this.#client = null;
       }
 
       const keyBytes = new Uint8Array(privateKey);
@@ -83,27 +93,24 @@ class XMTPClientManager {
   }
 
   /**
-   * Create a signer interface from a private key
-   * This is a simplified implementation - production should use proper crypto
+   * Create a signer interface from a private key using viem for proper ECDSA signing
    */
   #createSignerFromPrivateKey(privateKeyBytes) {
-    // Generate a mock Ethereum address from the private key
-    const address = '0x' + Array.from(privateKeyBytes.slice(12, 32))
+    const hexKey = '0x' + Array.from(privateKeyBytes)
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
 
+    const account = privateKeyToAccount(hexKey);
+
     return {
       type: 'EOA',
-      getIdentifier: async () => ({
-        identifier: address.toLowerCase(),
-        identifierKind: 'Ethereum'
+      getIdentifier: () => ({
+        identifier: account.address.toLowerCase(),
+        identifierKind: IdentifierKind.Ethereum
       }),
       signMessage: async (message) => {
-        // Simplified signing - in production use proper ECDSA signing
-        const encoder = new TextEncoder();
-        const data = encoder.encode(message);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        return new Uint8Array(hashBuffer);
+        const signature = await account.signMessage({ message });
+        return toBytes(signature);
       }
     };
   }
@@ -139,16 +146,16 @@ class XMTPClientManager {
       // Create DM conversation with the recipient
       const identifier = {
         identifier: recipientAddress.toLowerCase(),
-        identifierKind: 'Ethereum'
+        identifierKind: IdentifierKind.Ethereum
       };
 
-      const dm = await this.#client.conversations.newDmWithIdentifier(identifier);
+      const dm = await this.#client.conversations.createDmWithIdentifier(identifier);
 
       // Extract content from message object
       const content = this.#extractMessageContent(message);
 
-      // Send the message
-      await dm.send(content);
+      // Send the message as text
+      await dm.sendText(content);
 
       return dm.id;
     } catch (error) {
@@ -164,10 +171,10 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
-      const dm = await this.#client.conversations.newDm(recipientInboxId);
+      const dm = await this.#client.conversations.createDm(recipientInboxId);
       const content = this.#extractMessageContent(message);
 
-      await dm.send(content);
+      await dm.sendText(content);
 
       return dm.id;
     } catch (error) {
@@ -190,7 +197,7 @@ class XMTPClientManager {
       }
 
       const content = this.#extractMessageContent(message);
-      await group.send(content);
+      await group.sendText(content);
 
       return group.id;
     } catch (error) {
@@ -200,21 +207,41 @@ class XMTPClientManager {
   }
 
   /**
-   * Extract message content from message object
+   * Extract message content from message object.
+   * The Dart codec layer encodes text as {content: Uint8List, parameters: {...}}.
+   * On web, Uint8List arrives as various typed array forms.
    */
   #extractMessageContent(message) {
     if (typeof message === 'string') {
       return message;
     }
-    if (message.content) {
-      // If content is byte array, convert to string
-      if (Array.isArray(message.content)) {
-        const decoder = new TextDecoder();
-        return decoder.decode(new Uint8Array(message.content));
+    if (message && message.content !== undefined) {
+      const content = message.content;
+      // Byte array (Array, Uint8Array, or any array-like with numeric values)
+      if (content instanceof Uint8Array) {
+        return new TextDecoder().decode(content);
       }
-      return message.content;
+      if (Array.isArray(content)) {
+        return new TextDecoder().decode(new Uint8Array(content));
+      }
+      // ArrayBuffer
+      if (content instanceof ArrayBuffer) {
+        return new TextDecoder().decode(new Uint8Array(content));
+      }
+      // Already a string
+      if (typeof content === 'string') {
+        return content;
+      }
+      // Dart List<int> may arrive as a JS object with numeric keys and length
+      if (content.length !== undefined && typeof content !== 'string') {
+        try {
+          return new TextDecoder().decode(new Uint8Array(Array.from(content)));
+        } catch (_) {}
+      }
+      return String(content);
     }
-    return message;
+    // Fallback: try to stringify
+    return typeof message === 'object' ? JSON.stringify(message) : String(message);
   }
 
   // ============================================================================
@@ -242,22 +269,26 @@ class XMTPClientManager {
             const conversation = await this.#client.conversations.getConversationById(message.conversationId);
             const members = await conversation.members();
 
+            // In v6, content is already decoded — encode text as UTF-8 for backward compat
+            const contentStr = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+            const encodedBytes = new TextEncoder().encode(contentStr);
+
             const messageData = {
               id: message.id,
               content: message.content,
-              encodedContent: Array.from(new Uint8Array(message.encodedContent.content)),
-              parameters: message.parameters || {},
+              encodedContent: Array.from(encodedBytes),
+              parameters: {},
               sent: Number(message.sentAtNs / BigInt(1000000)), // Convert ns to ms
               conversationTopic: message.conversationId,
               senderInboxId: message.senderInboxId,
               type: {
-                authority_id: message.contentType.authorityId,
-                type_id: message.contentType.typeId,
-                version_major: message.contentType.versionMajor
+                authority_id: message.contentType?.authorityId ?? 'xmtp.org',
+                type_id: message.contentType?.typeId ?? 'text',
+                version_major: message.contentType?.versionMajor ?? 1
               },
               members: members.map(m => ({
                 inboxId: m.inboxId,
-                addresses: m.addresses.join(',')
+                addresses: (m.accountIdentifiers || []).map(id => id.identifier).join(',')
               }))
             };
 
@@ -288,7 +319,9 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
+      console.log('[XMTP] listDms: syncing conversations...');
       await this.#client.conversations.sync();
+      console.log('[XMTP] listDms: sync complete');
 
       // Build options with consent state filter if provided
       const options = {};
@@ -297,6 +330,7 @@ class XMTPClientManager {
       }
 
       const dms = await this.#client.conversations.listDms(options);
+      console.log('[XMTP] listDms: found', dms.length, 'DM(s)');
 
       const dmList = [];
       for (const dm of dms) {
@@ -312,7 +346,7 @@ class XMTPClientManager {
           consentState: this.#consentStateToString(consent),
           members: members.map(m => ({
             inboxId: m.inboxId,
-            addresses: m.addresses.join(',')
+            addresses: (m.accountIdentifiers || []).map(id => id.identifier).join(',')
           }))
         });
       }
@@ -333,7 +367,9 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
+      console.log('[XMTP] listGroups: syncing conversations...');
       await this.#client.conversations.sync();
+      console.log('[XMTP] listGroups: sync complete');
 
       // Build options with consent state filter if provided
       const options = {};
@@ -342,6 +378,7 @@ class XMTPClientManager {
       }
 
       const groups = await this.#client.conversations.listGroups(options);
+      console.log('[XMTP] listGroups: found', groups.length, 'group(s)');
 
       const groupList = [];
       for (const group of groups) {
@@ -358,7 +395,7 @@ class XMTPClientManager {
           consentState: this.#consentStateToString(consent),
           members: members.map(m => ({
             inboxId: m.inboxId,
-            addresses: m.addresses.join(',')
+            addresses: (m.accountIdentifiers || []).map(id => id.identifier).join(',')
           }))
         });
       }
@@ -382,7 +419,7 @@ class XMTPClientManager {
         throw new Error('Conversation not found');
       }
 
-      await conversation.updateConsentState('allowed');
+      await conversation.updateConsentState(ConsentState.Allowed);
       return true;
     } catch (error) {
       console.error('[XMTP] Failed to accept conversation:', error);
@@ -402,7 +439,7 @@ class XMTPClientManager {
         throw new Error('Conversation not found');
       }
 
-      await conversation.updateConsentState('denied');
+      await conversation.updateConsentState(ConsentState.Denied);
       return true;
     } catch (error) {
       console.error('[XMTP] Failed to deny conversation:', error);
@@ -417,7 +454,7 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
-      const dm = await this.#client.conversations.newDm(inboxId);
+      const dm = await this.#client.conversations.createDm(inboxId);
       const members = await dm.members();
       const peerInboxId = await dm.peerInboxId();
 
@@ -428,7 +465,7 @@ class XMTPClientManager {
         peerInboxId: peerInboxId,
         members: members.map(m => ({
           inboxId: m.inboxId,
-          addresses: m.addresses.join(',')
+          addresses: (m.accountIdentifiers || []).map(id => id.identifier).join(',')
         }))
       };
     } catch (error) {
@@ -446,10 +483,10 @@ class XMTPClientManager {
     try {
       const identifier = {
         identifier: address.toLowerCase(),
-        identifierKind: 'Ethereum'
+        identifierKind: IdentifierKind.Ethereum
       };
 
-      const inboxId = await this.#client.findInboxIdByIdentifier(identifier);
+      const inboxId = await this.#client.fetchInboxIdByIdentifier(identifier);
       return inboxId;
     } catch (error) {
       console.error('[XMTP] Failed to get inbox ID from address:', error);
@@ -466,10 +503,10 @@ class XMTPClientManager {
     try {
       const identifier = {
         identifier: peerAddress.toLowerCase(),
-        identifierKind: 'Ethereum'
+        identifierKind: IdentifierKind.Ethereum
       };
 
-      const dm = await this.#client.conversations.newDmWithIdentifier(identifier);
+      const dm = await this.#client.conversations.createDmWithIdentifier(identifier);
       return dm.id;
     } catch (error) {
       console.error('[XMTP] Failed to get conversation topic:', error);
@@ -486,7 +523,7 @@ class XMTPClientManager {
     try {
       const identifier = {
         identifier: address.toLowerCase(),
-        identifierKind: 'Ethereum'
+        identifierKind: IdentifierKind.Ethereum
       };
 
       const result = await this.#client.canMessage([identifier]);
@@ -510,10 +547,10 @@ class XMTPClientManager {
     try {
       const identifier = {
         identifier: peerAddress.toLowerCase(),
-        identifierKind: 'Ethereum'
+        identifierKind: IdentifierKind.Ethereum
       };
 
-      const dm = await this.#client.conversations.newDmWithIdentifier(identifier);
+      const dm = await this.#client.conversations.createDmWithIdentifier(identifier);
 
       const afterNs = BigInt(fromDate) * BigInt(1000000); // Convert ms to ns
       const messages = await dm.messages({ afterNs });
@@ -549,28 +586,34 @@ class XMTPClientManager {
 
   /**
    * Format messages for Flutter
+   * In v6, message.content is already decoded — we encode as UTF-8 for backward compat
    */
   async #formatMessages(messages, conversation) {
     const members = await conversation.members();
 
-    return messages.map(message => ({
-      id: message.id,
-      content: message.content,
-      encodedContent: Array.from(new Uint8Array(message.encodedContent.content)),
-      parameters: message.parameters || {},
-      sent: Number(message.sentAtNs / BigInt(1000000)),
-      conversationTopic: conversation.id,
-      senderInboxId: message.senderInboxId,
-      type: {
-        authority_id: message.contentType.authorityId,
-        type_id: message.contentType.typeId,
-        version_major: message.contentType.versionMajor
-      },
-      members: members.map(m => ({
-        inboxId: m.inboxId,
-        addresses: m.addresses.join(',')
-      }))
-    }));
+    return messages.map(message => {
+      const contentStr = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+      const encodedBytes = new TextEncoder().encode(contentStr);
+
+      return {
+        id: message.id,
+        content: message.content,
+        encodedContent: Array.from(encodedBytes),
+        parameters: {},
+        sent: Number(message.sentAtNs / BigInt(1000000)),
+        conversationTopic: conversation.id,
+        senderInboxId: message.senderInboxId,
+        type: {
+          authority_id: message.contentType?.authorityId ?? 'xmtp.org',
+          type_id: message.contentType?.typeId ?? 'text',
+          version_major: message.contentType?.versionMajor ?? 1
+        },
+        members: members.map(m => ({
+          inboxId: m.inboxId,
+          addresses: (m.accountIdentifiers || []).map(id => id.identifier).join(',')
+        }))
+      };
+    });
   }
 
   // ============================================================================
@@ -584,11 +627,22 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
-      const group = await this.#client.conversations.newGroup(inboxIds, {
-        name: options.name || '',
-        description: options.description || '',
-        imageUrl: options.imageUrl || ''
-      });
+      console.log('[XMTP] createGroup raw args:', typeof inboxIds, typeof options);
+      console.log('[XMTP] createGroup inboxIds:', JSON.stringify(inboxIds));
+      console.log('[XMTP] createGroup options:', JSON.stringify(options));
+      console.log('[XMTP] createGroup options keys:', options ? Object.keys(options) : 'null/undefined');
+      // If options is a Dart jsify'd object, try enumerating properties
+      if (options) {
+        for (const k in options) {
+          console.log('[XMTP]   option key:', k, '=', options[k]);
+        }
+      }
+      const groupOptions = {};
+      if (options?.name) groupOptions.name = options.name;
+      if (options?.description) groupOptions.description = options.description;
+      if (options?.imageUrl) groupOptions.imageUrl = options.imageUrl;
+      console.log('[XMTP] createGroup resolved options:', JSON.stringify(groupOptions));
+      const group = await this.#client.conversations.createGroup(inboxIds, groupOptions);
 
       return {
         id: group.id,
@@ -619,7 +673,7 @@ class XMTPClientManager {
       const members = await group.members();
       return members.map(m => ({
         inboxId: m.inboxId,
-        address: m.addresses.join(',')
+        address: (m.accountIdentifiers || []).map(id => id.identifier).join(',')
       }));
     } catch (error) {
       console.error('[XMTP] Failed to list group members:', error);
@@ -853,23 +907,25 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
-      // Use the client's method to get inbox states
-      const inboxStates = await this.#client.inboxStatesForInboxIds(refreshFromNetwork, inboxIds);
+      // v6: split into getInboxStates (local) and fetchInboxStates (network)
+      const inboxStates = refreshFromNetwork
+        ? await this.#client.preferences.fetchInboxStates(inboxIds)
+        : await this.#client.preferences.getInboxStates(inboxIds);
 
       return inboxStates.map(state => ({
         inboxId: state.inboxId,
-        identities: state.identities.map(id => ({
+        identities: (state.accountIdentifiers || []).map(id => ({
           identifier: id.identifier,
-          kind: id.kind?.toLowerCase() || 'ethereum'
+          kind: this.#identifierKindToString(id.identifierKind)
         })),
-        installations: state.installations.map(inst => ({
+        installations: (state.installations || []).map(inst => ({
           id: inst.id,
           createdAt: inst.clientTimestampNs ? Number(inst.clientTimestampNs / BigInt(1000000)) : null
         })),
-        recoveryIdentity: {
-          identifier: state.recoveryIdentity.identifier,
-          kind: state.recoveryIdentity.kind?.toLowerCase() || 'ethereum'
-        }
+        recoveryIdentity: state.recoveryIdentifier ? {
+          identifier: state.recoveryIdentifier.identifier,
+          kind: this.#identifierKindToString(state.recoveryIdentifier.identifierKind)
+        } : null
       }));
     } catch (error) {
       console.error('[XMTP] Failed to get inbox states:', error);
@@ -954,7 +1010,7 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
-      const state = await this.#client.preferences.getConsentState('inbox_id', inboxId);
+      const state = await this.#client.preferences.getConsentState(ConsentEntityType.InboxId, inboxId);
       return this.#consentStateToString(state);
     } catch (error) {
       console.error('[XMTP] Failed to get inbox consent state:', error);
@@ -970,7 +1026,7 @@ class XMTPClientManager {
 
     try {
       await this.#client.preferences.setConsentStates([{
-        entityType: 'inbox_id',
+        entityType: ConsentEntityType.InboxId,
         entity: inboxId,
         state: this.#mapConsentState(state)
       }]);
@@ -1001,6 +1057,21 @@ class XMTPClientManager {
   // ============================================================================
 
   /**
+   * Send a sync request to trigger history transfer
+   */
+  async sendSyncRequest() {
+    this.#ensureClientInitialized();
+
+    try {
+      await this.#client.sendSyncRequest();
+      return true;
+    } catch (error) {
+      console.error('[XMTP] Failed to send sync request:', error);
+      throw new Error(`Failed to send sync request: ${error.message}`);
+    }
+  }
+
+  /**
    * Sync all conversations from network
    * @param {Object} params - Parameters
    * @param {string[]} params.consentStates - Filter by consent states
@@ -1013,7 +1084,22 @@ class XMTPClientManager {
         ? consentStates.map(s => this.#mapConsentState(s))
         : undefined;
 
+      console.log('[XMTP] syncAll: consent states =', states, ', syncing...');
       const result = await this.#client.conversations.syncAll(states);
+      console.log('[XMTP] syncAll: complete, result =', result);
+
+      // Also call conversations.sync() to discover new conversations
+      console.log('[XMTP] syncAll: also running conversations.sync()...');
+      await this.#client.conversations.sync();
+      console.log('[XMTP] syncAll: conversations.sync() complete');
+
+      // List all conversations to see what we have after sync
+      const allConvos = await this.#client.conversations.list();
+      console.log('[XMTP] syncAll: total conversations after sync =', allConvos.length);
+      for (const c of allConvos) {
+        console.log('[XMTP]   convo:', c.id, 'type:', c.metadata?.conversationType);
+      }
+
       return { numGroupsSynced: result || 0 };
     } catch (error) {
       console.error('[XMTP] Failed to sync all:', error);
@@ -1052,14 +1138,17 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
+      console.log('[XMTP] listConversations: syncing...');
       await this.#client.conversations.sync();
       const conversations = await this.#client.conversations.list();
+      console.log('[XMTP] listConversations: found', conversations.length, 'conversation(s)');
 
       const conversationList = [];
       for (const convo of conversations) {
         const members = await convo.members();
         const consent = await convo.consentState();
-        const isGroup = convo.metadata?.conversationType === 'group';
+        const convType = convo.metadata?.conversationType;
+        const isGroup = convType === ConversationType.Group || convType === 'group';
 
         const item = {
           id: convo.id,
@@ -1069,7 +1158,7 @@ class XMTPClientManager {
           isGroup: isGroup,
           members: members.map(m => ({
             inboxId: m.inboxId,
-            addresses: m.addresses.join(',')
+            addresses: (m.accountIdentifiers || []).map(id => id.identifier).join(',')
           }))
         };
 
@@ -1099,7 +1188,7 @@ class XMTPClientManager {
 
     try {
       // For inbox IDs, we try to create a DM - if it succeeds, they can be messaged
-      const dm = await this.#client.conversations.newDm(inboxId);
+      const dm = await this.#client.conversations.createDm(inboxId);
       return dm !== null;
     } catch (error) {
       console.error('[XMTP] Failed to check if can message by inbox ID:', error);
@@ -1128,22 +1217,25 @@ class XMTPClientManager {
     this.#ensureClientInitialized();
 
     try {
-      const state = await this.#client.preferences.inboxState(refreshFromNetwork);
+      // v6: split into inboxState() (local) and fetchInboxState() (network)
+      const state = refreshFromNetwork
+        ? await this.#client.preferences.fetchInboxState()
+        : await this.#client.preferences.inboxState();
 
       return {
         inboxId: state.inboxId,
-        identities: state.identifiers.map(id => ({
+        identities: (state.accountIdentifiers || []).map(id => ({
           identifier: id.identifier,
-          kind: id.identifierKind?.toLowerCase() || 'ethereum'
+          kind: this.#identifierKindToString(id.identifierKind)
         })),
-        installations: state.installations.map(inst => ({
+        installations: (state.installations || []).map(inst => ({
           id: inst.id,
           createdAt: inst.clientTimestampNs ? Number(inst.clientTimestampNs / BigInt(1000000)) : null
         })),
-        recoveryIdentity: {
+        recoveryIdentity: state.recoveryIdentifier ? {
           identifier: state.recoveryIdentifier.identifier,
-          kind: state.recoveryIdentifier.identifierKind?.toLowerCase() || 'ethereum'
-        }
+          kind: this.#identifierKindToString(state.recoveryIdentifier.identifierKind)
+        } : null
       };
     } catch (error) {
       console.error('[XMTP] Failed to get inbox state:', error);
@@ -1219,7 +1311,7 @@ class XMTPClientManager {
     try {
       const identifier = {
         identifier: identifierToRemove.toLowerCase(),
-        identifierKind: 'Ethereum'
+        identifierKind: IdentifierKind.Ethereum
       };
 
       await this.#client.removeAccount(identifier);
@@ -1242,7 +1334,7 @@ class XMTPClientManager {
     try {
       const identifier = {
         identifier: newRecoveryIdentifier.toLowerCase(),
-        identifierKind: 'Ethereum'
+        identifierKind: IdentifierKind.Ethereum
       };
 
       await this.#client.changeRecoveryIdentifier(identifier);
@@ -1273,21 +1365,21 @@ class XMTPClientManager {
    * Create a static signer (for use without instance)
    */
   static #createStaticSigner(privateKeyBytes) {
-    const address = '0x' + Array.from(privateKeyBytes.slice(12, 32))
+    const hexKey = '0x' + Array.from(privateKeyBytes)
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
 
+    const account = privateKeyToAccount(hexKey);
+
     return {
       type: 'EOA',
-      getIdentifier: async () => ({
-        identifier: address.toLowerCase(),
-        identifierKind: 'Ethereum'
+      getIdentifier: () => ({
+        identifier: account.address.toLowerCase(),
+        identifierKind: IdentifierKind.Ethereum
       }),
       signMessage: async (message) => {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(message);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        return new Uint8Array(hashBuffer);
+        const signature = await account.signMessage({ message });
+        return toBytes(signature);
       }
     };
   }
@@ -1297,25 +1389,42 @@ class XMTPClientManager {
   // ============================================================================
 
   /**
-   * Map string consent state to SDK enum value
+   * Convert IdentifierKind enum (number) to string
    */
-  #mapConsentState(state) {
-    const stateMap = {
-      'allowed': 'allowed',
-      'denied': 'denied',
-      'unknown': 'unknown'
-    };
-    return stateMap[state?.toLowerCase()] || 'unknown';
+  #identifierKindToString(kind) {
+    // IdentifierKind.Ethereum = 0, IdentifierKind.Passkey = 1
+    switch (kind) {
+      case 0: return 'ethereum';
+      case 1: return 'passkey';
+      default: return 'ethereum';
+    }
   }
 
   /**
-   * Convert SDK consent state to string
+   * Map string consent state to SDK v6 ConsentState enum
+   */
+  #mapConsentState(state) {
+    const stateMap = {
+      'allowed': ConsentState.Allowed,
+      'denied': ConsentState.Denied,
+      'unknown': ConsentState.Unknown
+    };
+    return stateMap[state?.toLowerCase()] ?? ConsentState.Unknown;
+  }
+
+  /**
+   * Convert SDK v6 ConsentState enum to string
    */
   #consentStateToString(state) {
-    if (typeof state === 'string') return state.toLowerCase();
-    // Handle enum-like objects
-    if (state?.toString) return state.toString().toLowerCase();
-    return 'unknown';
+    switch (state) {
+      case ConsentState.Allowed: return 'allowed';
+      case ConsentState.Denied: return 'denied';
+      case ConsentState.Unknown: return 'unknown';
+      default:
+        // Fallback for any unexpected values
+        if (typeof state === 'string') return state.toLowerCase();
+        return 'unknown';
+    }
   }
 
   // ============================================================================
@@ -1333,6 +1442,6 @@ class XMTPClientManager {
 const xmtpClientManager = XMTPClientManager.getInstance();
 window.xmtpClientManager = xmtpClientManager;
 
-console.log('[XMTP] Client Manager v5 loaded and ready');
+console.log('[XMTP] Client Manager v6 loaded and ready');
 
 export default xmtpClientManager;

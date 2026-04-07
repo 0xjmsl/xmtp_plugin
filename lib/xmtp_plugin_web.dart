@@ -9,7 +9,7 @@ import 'xmtp_plugin_platform_interface.dart';
 
 /// Web implementation of the XMTP Flutter plugin.
 ///
-/// This implementation uses the XMTP Browser SDK v5 through JavaScript interop.
+/// This implementation uses the XMTP Browser SDK v6 through JavaScript interop.
 class XmtpPluginWeb extends XmtpPluginPlatform {
   /// Factory constructor that returns the singleton instance.
   static void registerWith(Registrar registrar) {

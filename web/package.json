@@ -1,11 +1,16 @@
 {
-  "name": "xmtp-flutter-web",
-  "version": "1.0.0",
+  "name": "xmtp-plugin-web",
+  "version": "2.0.0",
   "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
   "dependencies": {
-    "@xmtp/browser-sdk": "^5.0.1",
-    "@xmtp/content-type-text": "^2.0.2",
-    "@xmtp/content-type-primitives": "^2.0.2",
-    "@xmtp/content-type-group-updated": "^2.0.2"
+    "@xmtp/browser-sdk": "^6.3.0",
+    "@xmtp/content-type-primitives": "^3.0.0",
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
   }
 }

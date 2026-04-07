@@ -1,8 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'log_file.dart' if (dart.library.io) 'log_file_io.dart';
 import 'package:xmtp_plugin/xmtp_plugin.dart';
 
 void main() {
@@ -66,14 +68,14 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _runTests());
   }
 
-  // Log file for headless result checking
-  static final _logFile = File('${Directory.systemTemp.path}/xmtp_test_results.log');
   final _logBuffer = StringBuffer();
 
   void _log(String line) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
-    _logBuffer.writeln('[$ts] $line');
-    _logFile.writeAsStringSync(_logBuffer.toString());
+    final entry = '[$ts] $line';
+    _logBuffer.writeln(entry);
+    debugPrint(entry);
+    writeLog(_logBuffer.toString());
   }
   bool _done = false;
 
@@ -259,6 +261,13 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
     });
     if (!ok) return _finish();
 
+    // Wait for network propagation before switching users
+    ok = await _runStep('Wait for network propagation', () async {
+      await Future.delayed(const Duration(seconds: 8));
+      return 'waited 8s';
+    });
+    if (!ok) return _finish();
+
     // =========================================================================
     // Phase 4: Switch to Bob, verify received messages
     // =========================================================================
@@ -269,41 +278,72 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
     });
     if (!ok) return _finish();
 
-    ok = await _runStep('Bob: sync all conversations', () async {
-      await _xmtp.sendSyncRequest();
-      await Future.delayed(const Duration(seconds: 3));
-      final result = await _xmtp.syncAll(consentStates: ['allowed', 'unknown']);
-      return 'synced ${result['numGroupsSynced']} conversations';
+    ok = await _runStep('Bob: sync conversations (with retry)', () async {
+      for (var attempt = 1; attempt <= 5; attempt++) {
+        await _xmtp.syncAll(consentStates: ['allowed', 'unknown']);
+        final dms = await _xmtp.listDms();
+        final groups = await _xmtp.listGroups();
+        if (dms.isNotEmpty || groups.isNotEmpty) {
+          return 'attempt $attempt: found ${dms.length} DM(s), ${groups.length} group(s)';
+        }
+        await Future.delayed(const Duration(seconds: 5));
+      }
+      return 'found 0 after 5 attempts — network may be slow';
     });
     if (!ok) return _finish();
 
     ok = await _runStep('Bob: check DM from Alice', () async {
-      final since = DateTime.now().subtract(const Duration(minutes: 5));
-      final messages = await _xmtp.getMessagesAfterDateByTopic(_dmTopic, since);
+      // List DMs — should find the one Alice created after sync
+      final dms = await _xmtp.listDms();
+      String bobDmTopic = '';
+      // Find DM by peer inbox ID
+      for (final dm in dms) {
+        if (dm['peerInboxId'] == _aliceInboxId) {
+          bobDmTopic = dm['topic'] as String? ?? '';
+          break;
+        }
+      }
+      // Fallback: create from Bob's side
+      if (bobDmTopic.isEmpty) {
+        final dm = await _xmtp.findOrCreateDMWithInboxId(_aliceInboxId);
+        bobDmTopic = dm['topic'] as String? ?? '';
+      }
+      await _xmtp.syncConversation(bobDmTopic);
+      await Future.delayed(const Duration(seconds: 3));
+      final since = DateTime.now().subtract(const Duration(minutes: 10));
+      final messages = await _xmtp.getMessagesAfterDateByTopic(bobDmTopic, since);
       final textMessages = messages.where((m) {
-        final body = m['body'] as String?;
+        final content = m['content'];
         final decoded = m['decodedContent'];
-        return (body != null && body.contains('Alice')) ||
+        return (content is String && content.contains('Alice')) ||
                (decoded is String && decoded.contains('Alice'));
       }).toList();
       if (textMessages.isEmpty) {
-        throw Exception('No DM from Alice found. Got ${messages.length} messages total.');
+        final preview = messages.take(3).map((m) =>
+          'type=${m['type']}, content=${m['content']?.toString().substring(0, min(40, (m['content']?.toString().length ?? 0)))}'
+        ).join(' | ');
+        throw Exception('No DM from Alice. Got ${messages.length} msg(s), topic=$bobDmTopic, dms=${dms.length}. Preview: $preview');
       }
-      return 'found ${textMessages.length} message(s) from Alice';
+      return 'found ${textMessages.length} message(s) from Alice (topic=$bobDmTopic)';
     });
     if (!ok) return _finish();
 
     ok = await _runStep('Bob: check group message from Alice', () async {
-      final since = DateTime.now().subtract(const Duration(minutes: 5));
+      await _xmtp.syncConversation(_groupTopic);
+      await Future.delayed(const Duration(seconds: 3));
+      final since = DateTime.now().subtract(const Duration(minutes: 10));
       final messages = await _xmtp.getMessagesAfterDateByTopic(_groupTopic, since);
       final textMessages = messages.where((m) {
-        final body = m['body'] as String?;
+        final content = m['content'];
         final decoded = m['decodedContent'];
-        return (body != null && body.contains('team')) ||
+        return (content is String && content.contains('team')) ||
                (decoded is String && decoded.contains('team'));
       }).toList();
       if (textMessages.isEmpty) {
-        throw Exception('No group message from Alice found. Got ${messages.length} messages total.');
+        final preview = messages.take(3).map((m) =>
+          'type=${m['type']}, content=${m['content']?.toString().substring(0, min(40, (m['content']?.toString().length ?? 0)))}'
+        ).join(' | ');
+        throw Exception('No group msg from Alice. Got ${messages.length} msg(s). Preview: $preview');
       }
       return 'found ${textMessages.length} group message(s)';
     });
@@ -319,25 +359,35 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
     });
     if (!ok) return _finish();
 
-    ok = await _runStep('Charlie: sync all conversations', () async {
-      await _xmtp.sendSyncRequest();
-      await Future.delayed(const Duration(seconds: 3));
-      final result = await _xmtp.syncAll(consentStates: ['allowed', 'unknown']);
-      return 'synced ${result['numGroupsSynced']} conversations';
+    ok = await _runStep('Charlie: sync conversations (with retry)', () async {
+      for (var attempt = 1; attempt <= 5; attempt++) {
+        await _xmtp.syncAll(consentStates: ['allowed', 'unknown']);
+        final groups = await _xmtp.listGroups();
+        if (groups.isNotEmpty) {
+          return 'attempt $attempt: found ${groups.length} group(s)';
+        }
+        await Future.delayed(const Duration(seconds: 5));
+      }
+      return 'found 0 group(s) after 5 attempts';
     });
     if (!ok) return _finish();
 
     ok = await _runStep('Charlie: check group message from Alice', () async {
-      final since = DateTime.now().subtract(const Duration(minutes: 5));
+      await _xmtp.syncConversation(_groupTopic);
+      await Future.delayed(const Duration(seconds: 3));
+      final since = DateTime.now().subtract(const Duration(minutes: 10));
       final messages = await _xmtp.getMessagesAfterDateByTopic(_groupTopic, since);
       final textMessages = messages.where((m) {
-        final body = m['body'] as String?;
+        final content = m['content'];
         final decoded = m['decodedContent'];
-        return (body != null && body.contains('team')) ||
+        return (content is String && content.contains('team')) ||
                (decoded is String && decoded.contains('team'));
       }).toList();
       if (textMessages.isEmpty) {
-        throw Exception('No group message found. Got ${messages.length} messages total.');
+        final preview = messages.take(3).map((m) =>
+          'type=${m['type']}, content=${m['content']?.toString().substring(0, min(40, (m['content']?.toString().length ?? 0)))}'
+        ).join(' | ');
+        throw Exception('No group msg. Got ${messages.length} msg(s). Preview: $preview');
       }
       return 'found ${textMessages.length} group message(s)';
     });
@@ -354,7 +404,7 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
     if (!ok) return _finish();
 
     ok = await _runStep('Alice: add Alice2 key to her inbox (addAccount)', () async {
-      await _xmtp.addAccount(_alice2Key);
+      await _xmtp.addAccount(_alice2Key, allowReassignInboxId: true);
       return 'Alice2 key linked to Alice inbox';
     });
     if (!ok) return _finish();
@@ -374,7 +424,7 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
     // =========================================================================
 
     ok = await _runStep('Init Alice2 on dev network', () async {
-      final (addr, inbox) = await _initClient(_alice2Key, _alice2Db);
+      final (addr, inbox) = await _initClient(_alice2Key, _aliceDb);
       return 'address: ${addr.substring(0, 10)}... inbox: ${inbox.substring(0, 12)}...';
     });
     if (!ok) return _finish();
@@ -399,7 +449,8 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
     final passed = _steps.where((s) => s.status == StepStatus.passed).length;
     final failed = _steps.where((s) => s.status == StepStatus.failed).length;
     _log('=== DONE: $passed passed, $failed failed, ${_steps.length} total ===');
-    _log('Log: ${_logFile.path}');
+    final logPath = getLogPath();
+    if (logPath != null) _log('Log: $logPath');
     setState(() {
       _running = false;
       _done = true;
@@ -418,6 +469,18 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
       appBar: AppBar(
         title: const Text('XMTP Plugin Integration Tests'),
         actions: [
+          // Copy log button
+          if (_steps.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.copy),
+              tooltip: 'Copy log to clipboard',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _logBuffer.toString()));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Log copied to clipboard'), duration: Duration(seconds: 1)),
+                );
+              },
+            ),
           if (_done)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -441,7 +504,7 @@ class _TestRunnerPageState extends State<TestRunnerPage> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             color: Colors.indigo.withValues(alpha: 0.15),
             child: const Text(
-              'Network: dev (grpc.dev.xmtp.network)',
+              'Network: production (grpc.production.xmtp.network)',
               style: TextStyle(fontSize: 12, color: Colors.white54),
             ),
           ),

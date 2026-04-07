@@ -3,7 +3,12 @@ import 'dart:typed_data';
 import 'package:xmtp_plugin/codecs.dart';
 import 'package:xmtp_plugin/generated/content.pb.dart';
 import 'xmtp_plugin_platform_interface.dart';
-export 'xmtp_plugin_windows.dart';
+
+// Conditionally export the Windows FFI implementation only on platforms
+// that support dart:ffi. On web (dart:js_interop available) and platforms
+// without dart:ffi, export a stub to avoid compiling Rust/FFI bindings.
+export 'xmtp_plugin_windows.dart'
+    if (dart.library.js_interop) 'xmtp_plugin_windows_stub.dart';
 
 class XmtpPlugin {
   final XMTPCodecRegistry _codecRegistry = XMTPCodecRegistry();
@@ -102,8 +107,13 @@ class XmtpPlugin {
 
     rawStream.listen(
       (message) async {
-        // Deserialize encodedContent from protobuf bytes
-        final encodedContentBytes = message['encodedContent'] as Uint8List?;
+        // Deserialize encodedContent from protobuf bytes (web returns List<dynamic>, native returns Uint8List)
+        final rawEncoded = message['encodedContent'];
+        final Uint8List? encodedContentBytes = rawEncoded is Uint8List
+            ? rawEncoded
+            : rawEncoded is List
+                ? Uint8List.fromList(List<int>.from(rawEncoded))
+                : null;
         if (encodedContentBytes != null) {
           try {
             final encodedContent = EncodedContent.fromBuffer(encodedContentBytes);
@@ -162,7 +172,12 @@ class XmtpPlugin {
     final processedMessages = <Map<String, dynamic>>[];
 
     for (final messageMap in messages) {
-      final encodedContentBytes = messageMap['encodedContent'] as Uint8List?;
+      final rawEncoded = messageMap['encodedContent'];
+      final Uint8List? encodedContentBytes = rawEncoded is Uint8List
+          ? rawEncoded
+          : rawEncoded is List
+              ? Uint8List.fromList(List<int>.from(rawEncoded))
+              : null;
 
       if (encodedContentBytes != null) {
         try {

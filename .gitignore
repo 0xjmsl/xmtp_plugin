@@ -6,3 +6,7 @@ example/pubspec.lock
 test_app/pubspec.lock
 test_app/build/
 *.iml
+web/node_modules/
+web/dist/
+web/package-lock.json
+test_app/web/xmtp/
