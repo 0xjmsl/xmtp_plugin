@@ -654,10 +654,10 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                     }
                 } ?? [.allowed]
 
-                let numSynced = try await client.conversations.syncAllConversations(consentStates: states)
+                let summary = try await client.conversations.syncAllConversations(consentStates: states)
 
                 DispatchQueue.main.async {
-                    result(["numGroupsSynced": numSynced])
+                    result(["numGroupsSynced": summary.numSynced])
                 }
             } catch {
                 DispatchQueue.main.async {
