@@ -406,6 +406,24 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             }
             staticInboxStatesForInboxIds(inboxIds: inboxIds, result: result)
 
+        case "staticGetInboxIdForAddress":
+            guard let args = call.arguments as? [String: Any],
+                  let address = args["address"] as? String else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "address is required", details: nil))
+                return
+            }
+            let environment = args["environment"] as? String ?? "production"
+            staticGetInboxIdForAddress(address: address, environment: environment, result: result)
+
+        case "staticDeleteLocalDatabase":
+            guard let args = call.arguments as? [String: Any],
+                  let inboxId = args["inboxId"] as? String else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "inboxId is required", details: nil))
+                return
+            }
+            let environment = args["environment"] as? String ?? "production"
+            staticDeleteLocalDatabase(inboxId: inboxId, environment: environment, result: result)
+
         case "changeRecoveryIdentifier":
             // Not supported on iOS - only on web/JS
             result(FlutterError(code: "UNSUPPORTED_PLATFORM", message: "changeRecoveryIdentifier is only supported on web platforms", details: nil))
@@ -1922,6 +1940,54 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             } catch {
                 DispatchQueue.main.async {
                     result(FlutterError(code: "STATIC_INBOX_STATES_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    private func staticGetInboxIdForAddress(address: String, environment: String, result: @escaping FlutterResult) {
+        Task {
+            do {
+                let env = resolveEnvironment(environment)
+                let api = ClientOptions.Api(env: env, isSecure: env != .local)
+                let publicIdentity = PublicIdentity(kind: .ethereum, identifier: address)
+                let inboxId = try await XMTP.Client.getOrCreateInboxId(api: api, publicIdentity: publicIdentity)
+                DispatchQueue.main.async {
+                    result(inboxId)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "STATIC_GET_INBOX_ID_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    private func staticDeleteLocalDatabase(inboxId: String, environment: String, result: @escaping FlutterResult) {
+        Task {
+            do {
+                let env = resolveEnvironment(environment)
+                let alias = "xmtp-\(env.rawValue)-\(inboxId).db3"
+                let dbURL = URL.documentsDirectory.appendingPathComponent(alias)
+                let fm = FileManager.default
+                if fm.fileExists(atPath: dbURL.path) {
+                    try fm.removeItem(at: dbURL)
+                }
+                // Also clean up WAL/SHM if present
+                let walURL = dbURL.appendingPathExtension("wal")
+                if fm.fileExists(atPath: walURL.path) {
+                    try fm.removeItem(at: walURL)
+                }
+                let shmURL = dbURL.appendingPathExtension("shm")
+                if fm.fileExists(atPath: shmURL.path) {
+                    try fm.removeItem(at: shmURL)
+                }
+                DispatchQueue.main.async {
+                    result(nil)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "STATIC_DELETE_DB_FAILED", message: error.localizedDescription, details: nil))
                 }
             }
         }

@@ -964,6 +964,18 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
     }
   }
 
+  @override
+  Future<String?> staticGetInboxIdForAddress(String address,
+      {String environment = 'production'}) async {
+    throw UnimplementedError('staticGetInboxIdForAddress is not available on web');
+  }
+
+  @override
+  Future<void> staticDeleteLocalDatabase(String address, String inboxId,
+      {String environment = 'production'}) async {
+    throw UnimplementedError('staticDeleteLocalDatabase is not available on web');
+  }
+
   // ============================================================================
   // UTILITY FUNCTIONS
   // ============================================================================

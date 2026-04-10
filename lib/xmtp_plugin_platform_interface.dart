@@ -240,6 +240,14 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('staticInboxStatesForInboxIds() has not been implemented.');
   }
 
+  Future<String?> staticGetInboxIdForAddress(String address, {String environment = 'production'}) {
+    throw UnimplementedError('staticGetInboxIdForAddress() has not been implemented.');
+  }
+
+  Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production'}) {
+    throw UnimplementedError('staticDeleteLocalDatabase() has not been implemented.');
+  }
+
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) {
     throw UnimplementedError('changeRecoveryIdentifier() has not been implemented.');
   }

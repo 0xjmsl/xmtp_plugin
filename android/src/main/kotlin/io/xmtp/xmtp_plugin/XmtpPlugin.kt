@@ -528,6 +528,24 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
           result.error("INVALID_ARGUMENTS", "inboxIds is required", null)
         }
       }
+      "staticGetInboxIdForAddress" -> {
+        val address = call.argument<String>("address")
+        val environment = call.argument<String>("environment") ?: "production"
+        if (address != null) {
+          staticGetInboxIdForAddress(address, environment, result)
+        } else {
+          result.error("INVALID_ARGUMENTS", "address is required", null)
+        }
+      }
+      "staticDeleteLocalDatabase" -> {
+        val inboxId = call.argument<String>("inboxId")
+        val environment = call.argument<String>("environment") ?: "production"
+        if (inboxId != null) {
+          staticDeleteLocalDatabase(inboxId, environment, result)
+        } else {
+          result.error("INVALID_ARGUMENTS", "inboxId is required", null)
+        }
+      }
       "changeRecoveryIdentifier" -> {
         // Not supported on Android - only on web/JS
         result.error("UNSUPPORTED_PLATFORM", "changeRecoveryIdentifier is only supported on web platforms", null)
@@ -1647,6 +1665,48 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
         result.success(statesList)
       } catch (e: Exception) {
         result.error("STATIC_INBOX_STATES_FAILED", e.message, null)
+      }
+    }
+  }
+
+  private fun staticGetInboxIdForAddress(address: String, environment: String, result: Result) {
+    scope.launch {
+      try {
+        val env = when (environment) {
+          "dev" -> XMTPEnvironment.DEV
+          "local" -> XMTPEnvironment.LOCAL
+          else -> XMTPEnvironment.PRODUCTION
+        }
+        val api = ClientOptions.Api(env, true)
+        val publicIdentity = PublicIdentity(IdentityKind.ETHEREUM, address)
+        val inboxId = Client.getOrCreateInboxId(api, publicIdentity)
+        result.success(inboxId)
+      } catch (e: Exception) {
+        result.error("STATIC_GET_INBOX_ID_FAILED", e.message, null)
+      }
+    }
+  }
+
+  private fun staticDeleteLocalDatabase(inboxId: String, environment: String, result: Result) {
+    scope.launch {
+      try {
+        val env = when (environment) {
+          "dev" -> XMTPEnvironment.DEV
+          "local" -> XMTPEnvironment.LOCAL
+          else -> XMTPEnvironment.PRODUCTION
+        }
+        val alias = "xmtp-${env}-${inboxId}"
+        val dbDir = java.io.File(context.filesDir.absolutePath, "xmtp_db")
+        val dbFile = java.io.File(dbDir, "${alias}.db3")
+        if (dbFile.exists()) dbFile.delete()
+        // Also clean up WAL/SHM if present
+        val walFile = java.io.File(dbDir, "${alias}.db3-wal")
+        val shmFile = java.io.File(dbDir, "${alias}.db3-shm")
+        if (walFile.exists()) walFile.delete()
+        if (shmFile.exists()) shmFile.delete()
+        result.success(null)
+      } catch (e: Exception) {
+        result.error("STATIC_DELETE_DB_FAILED", e.message, null)
       }
     }
   }

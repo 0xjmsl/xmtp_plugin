@@ -420,6 +420,28 @@ class XmtpPlugin {
     return XmtpPluginPlatform.instance.staticInboxStatesForInboxIds(inboxIds);
   }
 
+  /// Look up the real XMTP inbox ID for an Ethereum address from the network.
+  /// Handles linked accounts (keys added to another inbox via `addAccount`).
+  /// Returns null if the address has no inbox on the network.
+  /// Does NOT require an initialized client.
+  static Future<String?> staticGetInboxIdForAddress(
+    String address, {
+    String environment = 'production',
+  }) async {
+    return XmtpPluginPlatform.instance.staticGetInboxIdForAddress(address, environment: environment);
+  }
+
+  /// Delete the local XMTP database files for a given address/inboxId.
+  /// Each platform uses the parameters it needs to construct the DB path.
+  /// Does NOT require an initialized client.
+  static Future<void> staticDeleteLocalDatabase(
+    String address,
+    String inboxId, {
+    String environment = 'production',
+  }) async {
+    return XmtpPluginPlatform.instance.staticDeleteLocalDatabase(address, inboxId, environment: environment);
+  }
+
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) async {
     return _platform.changeRecoveryIdentifier(signerPrivateKey, newRecoveryIdentifier);
   }

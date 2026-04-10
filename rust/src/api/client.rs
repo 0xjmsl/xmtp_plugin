@@ -56,15 +56,57 @@ pub fn address_from_private_key(private_key: Vec<u8>) -> Result<String> {
     Ok(eth_address_from_key(&signing_key))
 }
 
-/// Compute the XMTP inbox ID for a given Ethereum address.
-/// The inbox ID is deterministic: sha256(lowercased_address + nonce).
-pub fn compute_inbox_id(address: String) -> Result<String> {
+/// Look up the real XMTP inbox ID for an Ethereum address from the network.
+/// Handles linked accounts (keys added to another inbox via `addAccount`).
+/// Returns `None` if the address has no inbox on the network.
+/// Does NOT require an initialized client.
+pub async fn static_get_inbox_id_for_address(
+    address: String,
+    environment: String,
+) -> Result<Option<String>> {
+    use xmtp_api::ApiClientWrapper;
+    use xmtp_api_d14n::MessageBackendBuilder;
+
+    let (grpc_host, _, is_secure) = resolve_environment(&environment);
     let identifier =
         Identifier::eth(&address).map_err(|e| anyhow!("Invalid Ethereum address: {e}"))?;
-    let inbox_id = identifier
-        .inbox_id(1)
-        .map_err(|e| anyhow!("Failed to compute inbox ID: {e}"))?;
-    Ok(inbox_id)
+    let api_ident: xmtp_proto::types::ApiIdentifier = identifier.into();
+
+    let lookup_client = MessageBackendBuilder::default()
+        .v3_host(grpc_host)
+        .maybe_gateway_host(None::<String>)
+        .is_secure(is_secure)
+        .build()
+        .map_err(|e| anyhow!("Failed to build lookup client: {e}"))?;
+    let lookup_api = ApiClientWrapper::new(
+        std::sync::Arc::new(lookup_client),
+        xmtp_api::strategies::exponential_cooldown(),
+    );
+
+    let inbox_id_map = lookup_api
+        .get_inbox_ids(vec![api_ident.clone()])
+        .await
+        .map_err(|e| anyhow!("Failed to look up inbox ID: {e}"))?;
+
+    Ok(inbox_id_map.get(&api_ident).cloned())
+}
+
+/// Delete the local XMTP database files for a given address.
+/// Removes the .db3, .db3-wal, and .db3-shm files.
+/// Does NOT require an initialized client.
+/// On Windows, the DB path is based on the address prefix (not inbox ID).
+pub fn static_delete_local_database(address: String) -> Result<()> {
+    let db_dir = std::env::temp_dir().join("xmtp_plugin");
+    if address.len() < 10 {
+        return Err(anyhow!("Invalid address: too short"));
+    }
+    let db_path = db_dir.join(format!("{}.db3", &address[2..10]));
+
+    let _ = std::fs::remove_file(&db_path);
+    let _ = std::fs::remove_file(db_path.with_extension("db3-wal"));
+    let _ = std::fs::remove_file(db_path.with_extension("db3-shm"));
+
+    Ok(())
 }
 
 /// Resolve an environment string to (grpc_host, history_sync_url, is_secure).
@@ -426,44 +468,21 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_inbox_id_deterministic() {
-        let key = generate_private_key();
-        let address = address_from_private_key(key).unwrap();
-        let id1 = compute_inbox_id(address.clone()).unwrap();
-        let id2 = compute_inbox_id(address).unwrap();
-        assert_eq!(id1, id2, "Same address must produce same inbox ID");
-    }
-
-    #[test]
-    fn test_compute_inbox_id_format() {
-        let key = generate_private_key();
-        let address = address_from_private_key(key).unwrap();
-        let inbox_id = compute_inbox_id(address).unwrap();
-        assert_eq!(inbox_id.len(), 64, "Inbox ID must be 64 hex chars");
-        assert!(
-            inbox_id.chars().all(|c| c.is_ascii_hexdigit()),
-            "Inbox ID must be valid hex"
-        );
-    }
-
-    #[test]
-    fn test_compute_inbox_id_different_addresses() {
-        let key1 = generate_private_key();
-        let key2 = generate_private_key();
-        let addr1 = address_from_private_key(key1).unwrap();
-        let addr2 = address_from_private_key(key2).unwrap();
-        let id1 = compute_inbox_id(addr1).unwrap();
-        let id2 = compute_inbox_id(addr2).unwrap();
-        assert_ne!(id1, id2, "Different addresses must have different inbox IDs");
-    }
-
-    #[test]
-    fn test_compute_inbox_id_invalid_address() {
-        let result = compute_inbox_id("not_an_address".to_string());
-        assert!(result.is_err(), "Should reject invalid addresses");
-
-        let result = compute_inbox_id("0x".to_string());
+    fn test_static_delete_local_database_invalid_address() {
+        let result = static_delete_local_database("0x".to_string());
         assert!(result.is_err(), "Should reject too-short addresses");
+
+        let result = static_delete_local_database("short".to_string());
+        assert!(result.is_err(), "Should reject too-short addresses");
+    }
+
+    #[test]
+    fn test_static_delete_local_database_no_file() {
+        // Should succeed even if no DB file exists (remove_file failures are ignored)
+        let key = generate_private_key();
+        let address = address_from_private_key(key).unwrap();
+        let result = static_delete_local_database(address);
+        assert!(result.is_ok(), "Should succeed even if no DB exists");
     }
 
     #[test]

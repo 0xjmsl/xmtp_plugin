@@ -35,9 +35,8 @@ Future<bool> removeAccount(
         identifierToRemove: identifierToRemove);
 
 /// Add a new identity (wallet address) to the current inbox.
-/// Uses the stored signer key (from initializeClient) as the existing member,
-/// and the provided new_account_private_key as the new member.
-/// Both sign the same association request (dual-signature flow).
+/// `associate_identity` internally signs with the installation key as the
+/// existing member, so we only need to provide the new member's signature.
 Future<bool> addAccount({required List<int> newAccountPrivateKey}) =>
     RustLib.instance.api
         .crateApiSigningAddAccount(newAccountPrivateKey: newAccountPrivateKey);

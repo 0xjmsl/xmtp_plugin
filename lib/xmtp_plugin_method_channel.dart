@@ -494,6 +494,24 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
   }
 
   @override
+  Future<String?> staticGetInboxIdForAddress(String address, {String environment = 'production'}) async {
+    final String? result = await methodChannel.invokeMethod('staticGetInboxIdForAddress', {
+      'address': address,
+      'environment': environment,
+    });
+    return result;
+  }
+
+  @override
+  Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production'}) async {
+    await methodChannel.invokeMethod('staticDeleteLocalDatabase', {
+      'address': address,
+      'inboxId': inboxId,
+      'environment': environment,
+    });
+  }
+
+  @override
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) async {
     await methodChannel.invokeMethod('changeRecoveryIdentifier', {
       'signerPrivateKey': signerPrivateKey,

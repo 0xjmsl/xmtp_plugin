@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -134188993;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 723315845;
 
 // Section: executor
 
@@ -299,41 +299,6 @@ fn wire__crate__api__conversations__can_message_impl(
                         Ok(output_ok)
                     })()
                     .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__api__client__compute_inbox_id_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "compute_inbox_id",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_address = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || {
-                        let output_ok = crate::api::client::compute_inbox_id(api_address)?;
-                        Ok(output_ok)
-                    })(),
                 )
             }
         },
@@ -1753,6 +1718,83 @@ fn wire__crate__api__consent__set_inbox_consent_state_impl(
         },
     )
 }
+fn wire__crate__api__client__static_delete_local_database_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "static_delete_local_database",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_address = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok =
+                            crate::api::client::static_delete_local_database(api_address)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__client__static_get_inbox_id_for_address_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "static_get_inbox_id_for_address",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_address = <String>::sse_decode(&mut deserializer);
+            let api_environment = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::client::static_get_inbox_id_for_address(
+                            api_address,
+                            api_environment,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__signing__static_inbox_states_for_inbox_ids_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2382,173 +2424,184 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         7 => wire__crate__api__conversations__can_message_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__client__compute_inbox_id_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__conversations__conversation_topic_from_address_impl(
+        8 => wire__crate__api__conversations__conversation_topic_from_address_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        10 => wire__crate__api__conversations__deny_conversation_impl(
+        9 => wire__crate__api__conversations__deny_conversation_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        11 => wire__crate__api__conversations__find_or_create_dm_with_inbox_id_impl(
+        10 => wire__crate__api__conversations__find_or_create_dm_with_inbox_id_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        12 => {
+        11 => {
             wire__crate__api__client__generate_private_key_impl(port, ptr, rust_vec_len, data_len)
         }
-        13 => wire__crate__api__client__get_client_address_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__client__get_client_inbox_id_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__consent__get_conversation_consent_state_impl(
+        12 => wire__crate__api__client__get_client_address_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__client__get_client_inbox_id_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__consent__get_conversation_consent_state_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        16 => {
+        15 => {
             wire__crate__api__groups__get_group_member_role_impl(port, ptr, rust_vec_len, data_len)
         }
-        17 => wire__crate__api__consent__get_inbox_consent_state_impl(
+        16 => wire__crate__api__consent__get_inbox_consent_state_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => wire__crate__api__inbox__get_inbox_state_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__inbox__get_installation_id_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__messaging__get_messages_after_date_impl(
+        17 => wire__crate__api__inbox__get_inbox_state_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__inbox__get_installation_id_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__messaging__get_messages_after_date_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        21 => wire__crate__api__messaging__get_messages_after_date_by_topic_impl(
+        20 => wire__crate__api__messaging__get_messages_after_date_by_topic_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        22 => {
+        21 => {
             wire__crate__api__client__get_platform_version_impl(port, ptr, rust_vec_len, data_len)
         }
-        23 => wire__crate__api__conversations__inbox_id_from_address_impl(
+        22 => wire__crate__api__conversations__inbox_id_from_address_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        24 => wire__crate__api__groups__inbox_states_for_inbox_ids_impl(
+        23 => wire__crate__api__groups__inbox_states_for_inbox_ids_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        25 => wire__crate__api__client__initialize_client_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__conversations__list_conversations_impl(
+        24 => wire__crate__api__client__initialize_client_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__conversations__list_conversations_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        27 => wire__crate__api__conversations__list_dms_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__groups__list_group_admins_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__groups__list_group_members_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__groups__list_group_super_admins_impl(
+        26 => wire__crate__api__conversations__list_dms_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__groups__list_group_admins_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__groups__list_group_members_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__groups__list_group_super_admins_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        31 => wire__crate__api__conversations__list_groups_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__messaging__load_remote_attachment_impl(
+        30 => wire__crate__api__conversations__list_groups_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__messaging__load_remote_attachment_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => wire__crate__api__groups__new_group_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__signing__remove_account_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__groups__remove_group_admin_impl(port, ptr, rust_vec_len, data_len),
-        36 => {
+        32 => wire__crate__api__groups__new_group_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__signing__remove_account_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__groups__remove_group_admin_impl(port, ptr, rust_vec_len, data_len),
+        35 => {
             wire__crate__api__groups__remove_group_members_impl(port, ptr, rust_vec_len, data_len)
         }
-        37 => wire__crate__api__groups__remove_group_super_admin_impl(
+        36 => wire__crate__api__groups__remove_group_super_admin_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => wire__crate__api__signing__revoke_all_other_installations_impl(
+        37 => wire__crate__api__signing__revoke_all_other_installations_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => {
+        38 => {
             wire__crate__api__signing__revoke_installations_impl(port, ptr, rust_vec_len, data_len)
         }
-        40 => {
+        39 => {
             wire__crate__api__messaging__send_group_message_impl(port, ptr, rust_vec_len, data_len)
         }
-        41 => wire__crate__api__messaging__send_message_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__messaging__send_message_by_inbox_id_impl(
+        40 => wire__crate__api__messaging__send_message_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__messaging__send_message_by_inbox_id_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => wire__crate__api__inbox__send_sync_request_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__consent__set_conversation_consent_state_impl(
+        42 => wire__crate__api__inbox__send_sync_request_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__consent__set_conversation_consent_state_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        45 => wire__crate__api__consent__set_inbox_consent_state_impl(
+        44 => wire__crate__api__consent__set_inbox_consent_state_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__signing__static_inbox_states_for_inbox_ids_impl(
+        45 => wire__crate__api__client__static_delete_local_database_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        47 => wire__crate__api__signing__static_revoke_installations_impl(
+        46 => wire__crate__api__client__static_get_inbox_id_for_address_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        48 => wire__crate__api__messaging__subscribe_to_all_messages_impl(
+        47 => wire__crate__api__signing__static_inbox_states_for_inbox_ids_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => wire__crate__api__conversations__sync_all_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__consent__sync_consent_preferences_impl(
+        48 => wire__crate__api__signing__static_revoke_installations_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => wire__crate__api__conversations__sync_conversation_impl(
+        49 => wire__crate__api__messaging__subscribe_to_all_messages_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        52 => wire__crate__api__groups__update_group_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__conversations__sync_all_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__consent__sync_consent_preferences_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        52 => wire__crate__api__conversations__sync_conversation_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        53 => wire__crate__api__groups__update_group_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

@@ -120,7 +120,11 @@ If the DLL is missing, the app crashes on launch with no clear error. If the DLL
 
 **Important:** Kill any running instance of your app before rebuilding. The linker cannot overwrite the exe while the process is running (LNK1168 error).
 
+**Debug vs Release:** The DLL build mode must match the app build mode. A Debug DLL won't work with a Release app and vice versa. Use `cargo build` for debug, `cargo build --release` for release. The outputs are in `rust/target/debug/` and `rust/target/release/` respectively.
+
 **flutter_rust_bridge version:** Both Dart and Rust sides are pinned to `2.11.1`. Use `flutter_rust_bridge: 2.11.1` (no caret) in your app's pubspec.yaml. A version mismatch causes a "codegen version mismatch" crash at runtime.
+
+**Why no pre-built DLL on pub.dev?** The Rust crate depends on `libxmtp` which links against platform-specific C libraries (OpenSSL, etc.) during compilation. Cross-compiling and shipping a universal pre-built binary is not practical — the build must happen on the target machine with its own toolchain. The CMakeLists.txt uses Corrosion to automate this when the Rust source is available (local path dependency), but pub.dev does not include the `rust/` directory.
 
 ### Web
 

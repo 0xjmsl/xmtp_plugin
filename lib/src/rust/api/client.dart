@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `eth_address_from_key`
+// These functions are ignored because they are not marked as `pub`: `eth_address_from_key`, `resolve_environment`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ClientState`
 
 /// Returns the platform version string.
@@ -23,21 +23,41 @@ Future<String> addressFromPrivateKey({required List<int> privateKey}) =>
     RustLib.instance.api
         .crateApiClientAddressFromPrivateKey(privateKey: privateKey);
 
-/// Compute the XMTP inbox ID for a given Ethereum address.
-/// The inbox ID is deterministic: sha256(lowercased_address + nonce).
-Future<String> computeInboxId({required String address}) =>
-    RustLib.instance.api.crateApiClientComputeInboxId(address: address);
+/// Look up the real XMTP inbox ID for an Ethereum address from the network.
+/// Handles linked accounts (keys added to another inbox via `addAccount`).
+/// Returns `None` if the address has no inbox on the network.
+/// Does NOT require an initialized client.
+Future<String?> staticGetInboxIdForAddress(
+        {required String address, required String environment}) =>
+    RustLib.instance.api.crateApiClientStaticGetInboxIdForAddress(
+        address: address, environment: environment);
+
+/// Delete the local XMTP database files for a given address.
+/// Removes the .db3, .db3-wal, and .db3-shm files.
+/// Does NOT require an initialized client.
+/// On Windows, the DB path is based on the address prefix (not inbox ID).
+Future<void> staticDeleteLocalDatabase({required String address}) =>
+    RustLib.instance.api
+        .crateApiClientStaticDeleteLocalDatabase(address: address);
 
 /// Initialize an XMTP client with the given private key and database encryption key.
 ///
-/// This connects to the XMTP production network, creates (or opens) an encrypted
+/// Connects to the specified XMTP network environment, creates (or opens) an encrypted
 /// local database, and registers the identity if needed.
+///
+/// Automatically looks up the address's inbox ID on the network first (handles
+/// linked accounts via `addAccount`). Falls back to computing a fresh inbox ID
+/// if the address is not yet registered.
 ///
 /// Returns the Ethereum address of the initialized client.
 Future<String> initializeClient(
-        {required List<int> privateKey, required List<int> dbEncryptionKey, String environment = 'production'}) =>
+        {required List<int> privateKey,
+        required List<int> dbEncryptionKey,
+        required String environment}) =>
     RustLib.instance.api.crateApiClientInitializeClient(
-        privateKey: privateKey, dbEncryptionKey: dbEncryptionKey, environment: environment);
+        privateKey: privateKey,
+        dbEncryptionKey: dbEncryptionKey,
+        environment: environment);
 
 /// Get the current client's Ethereum address.
 /// Returns an error if no client has been initialized.

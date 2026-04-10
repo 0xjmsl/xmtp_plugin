@@ -555,6 +555,25 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
         .toList();
   }
 
+  @override
+  Future<String?> staticGetInboxIdForAddress(String address,
+      {String environment = 'production'}) async {
+    await _ensureInitialized();
+    return await rust_client.staticGetInboxIdForAddress(
+      address: address,
+      environment: environment,
+    );
+  }
+
+  @override
+  Future<void> staticDeleteLocalDatabase(String address, String inboxId,
+      {String environment = 'production'}) async {
+    await _ensureInitialized();
+    await rust_client.staticDeleteLocalDatabase(
+      address: address,
+    );
+  }
+
   // ============================================================================
   // PRIVATE HELPERS — Convert typed FRB structs to Maps matching Android format
   // ============================================================================

@@ -1,3 +1,9 @@
+## 1.0.4
+
+* **Added `staticGetInboxIdForAddress(address, environment)`** — Network lookup for the real XMTP inbox ID mapped to an Ethereum address. Handles linked accounts (keys added to another inbox via `addAccount`). Does NOT require an initialized client. Available on Android, iOS, and Windows.
+* **Added `staticDeleteLocalDatabase(address, inboxId, environment)`** — Deletes the local XMTP database files for a given address/inboxId without requiring an initialized client. Enables recovery when the DB encryption key is lost but the local DB still exists. Available on Android, iOS, and Windows.
+* **Removed `computeInboxId`** — Gave wrong results for addresses added to a different inbox via `addAccount`. Use `staticGetInboxIdForAddress` (network lookup) instead.
+
 ## 1.0.3
 
 * **Web: Upgraded to XMTP Browser SDK v6.** Complete rewrite of the JavaScript bridge (`web/xmtp_client_manager.js`). All v6 API changes adopted: `createDm`/`createGroup` (renamed), `sendText` (replaces `send`), `IdentifierKind` enums, `accountIdentifiers` (replaces `addresses`), `fetchInboxState`/`inboxState` split, `ConsentState`/`ConsentEntityType` enums.
