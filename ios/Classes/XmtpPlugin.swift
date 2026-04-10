@@ -1,7 +1,6 @@
 import Flutter
 import UIKit
 import XMTP
-import LibXMTP
 import Foundation
 
 struct ContentType {
@@ -1968,7 +1967,8 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             do {
                 let env = resolveEnvironment(environment)
                 let alias = "xmtp-\(env.rawValue)-\(inboxId).db3"
-                let dbURL = URL.documentsDirectory.appendingPathComponent(alias)
+                let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                let dbURL = docsDir.appendingPathComponent(alias)
                 let fm = FileManager.default
                 if fm.fileExists(atPath: dbURL.path) {
                     try fm.removeItem(at: dbURL)
