@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:xmtp_plugin/codecs.dart';
-import 'package:xmtp_plugin/generated/content.pb.dart';
 import 'xmtp_plugin_platform_interface.dart';
 
 // Conditionally export the Windows FFI implementation only on platforms
