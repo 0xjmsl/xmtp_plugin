@@ -1,4 +1,6 @@
 .claude/
+CLAUDE.md
+.gitignore
 .vscode/
 .idea/
 rust/target/

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
@@ -880,6 +881,121 @@ class RemoteAttachmentCodec extends XMTPCodec {
     return Uint8List.sublistView(decrypted, 0, totalLen);
   }
 
+  /// AES-256-GCM with HKDF-SHA256-derived key. Inverse of [_decrypt].
+  /// Matches the XMTP remote-attachment encryption scheme used by every
+  /// reference SDK (xmtp-android Crypto.encrypt, xmtp-ios Crypto.encrypt,
+  /// xmtp-js encrypt/encryption.ts).
+  static Future<Uint8List> _encrypt({
+    required Uint8List secret,
+    required Uint8List salt,
+    required Uint8List nonce,
+    required Uint8List plaintext,
+  }) async {
+    final hkdf = HKDFKeyDerivator(SHA256Digest());
+    hkdf.init(HkdfParameters(secret, 32, salt));
+    final key = hkdf.process(Uint8List(0));
+
+    final cipher = GCMBlockCipher(AESFastEngine());
+    cipher.init(
+      true,
+      AEADParameters(KeyParameter(key), 128, nonce, Uint8List(0)),
+    );
+
+    final out = Uint8List(cipher.getOutputSize(plaintext.length));
+    var offset = 0;
+    offset += cipher.processBytes(plaintext, 0, plaintext.length, out, offset);
+    final finalLen = cipher.doFinal(out, offset);
+    return Uint8List.sublistView(out, 0, offset + finalLen);
+  }
+
+  /// Spec-compliant counterpart to [load] / [_fetchDecryptAndParse].
+  ///
+  /// Wraps [content] in an [EncodedContent] envelope using [codec], serializes
+  /// the envelope to protobuf bytes, then AES-256-GCM encrypts those bytes with
+  /// a fresh random secret/salt/nonce. The output is the exact wire shape
+  /// produced by xmtp-android `RemoteAttachmentCodec.encodeEncrypted<T>`,
+  /// xmtp-ios `RemoteAttachment.encodeEncrypted`, and xmtp-js
+  /// `RemoteAttachmentCodec.encodeEncrypted<T>` — interoperable with every
+  /// spec-compliant XMTP client.
+  ///
+  /// Pre-1.0.5 we encrypted the raw inner payload directly; that decrypted
+  /// into bare bytes, not into a protobuf, and native SDKs threw on parse
+  /// (their `EncodedContent.parseFrom` / `EncodedContent(serializedData:)` /
+  /// `proto.EncodedContent.decode` paths have no fallback). Callers should
+  /// always use this helper — `_encrypt` is private on purpose.
+  ///
+  /// [filename] populates the optional `RemoteAttachmentContent.filename`
+  /// envelope parameter that travels alongside the URL — purely informational
+  /// for receivers that want to display a name before downloading the payload.
+  /// The authoritative filename lives inside the encrypted envelope.
+  static Future<EncryptedEncodedContent> encodeEncrypted<T>(
+    T content,
+    XMTPCodec codec, {
+    String? filename,
+  }) async {
+    final encoded = await codec.encode(content);
+    final innerContent = encoded['content'];
+    final Uint8List innerBytes;
+    if (innerContent is Uint8List) {
+      innerBytes = innerContent;
+    } else if (innerContent is List<int>) {
+      innerBytes = Uint8List.fromList(innerContent);
+    } else {
+      throw FormatException(
+        'codec.encode returned non-bytes "content": ${innerContent.runtimeType}',
+      );
+    }
+
+    final envelope = EncodedContent()
+      ..type = (ContentTypeId()
+        ..authorityId = codec.authorityId
+        ..typeId = codec.typeId
+        ..versionMajor = codec.versionMajor
+        ..versionMinor = codec.versionMinor)
+      ..content = innerBytes;
+    final innerParams = encoded['parameters'];
+    if (innerParams is Map) {
+      innerParams.forEach((k, v) {
+        envelope.parameters[k.toString()] = v.toString();
+      });
+    }
+
+    final serialized = Uint8List.fromList(envelope.writeToBuffer());
+
+    final random = Random.secure();
+    final secret = Uint8List(32);
+    final salt = Uint8List(32);
+    final nonce = Uint8List(12);
+    for (var i = 0; i < 32; i++) {
+      secret[i] = random.nextInt(256);
+      salt[i] = random.nextInt(256);
+    }
+    for (var i = 0; i < 12; i++) {
+      nonce[i] = random.nextInt(256);
+    }
+
+    final ciphertext = await _encrypt(
+      secret: secret,
+      salt: salt,
+      nonce: nonce,
+      plaintext: serialized,
+    );
+
+    final digestBytes = SHA256Digest().process(ciphertext);
+    final contentDigest =
+        digestBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+    return EncryptedEncodedContent(
+      contentDigest: contentDigest,
+      secret: secret,
+      salt: salt,
+      nonce: nonce,
+      payload: ciphertext,
+      contentLength: ciphertext.length,
+      filename: filename,
+    );
+  }
+
   static Future<Uint8List> _fetchAndDecrypt(RemoteAttachmentContent content, {int maxRetries = 3}) async {
     int retryCount = 0;
     Duration retryDelay = const Duration(seconds: 1);
@@ -978,15 +1094,31 @@ class RemoteAttachmentCodec extends XMTPCodec {
       print('RemoteAttachment: Attempting to use decrypted bytes directly as attachment data');
 
       // Fallback: Maybe the decrypted bytes ARE the attachment data directly?
-      // Try to infer MIME type from filename
+      // Try to infer MIME type from filename. Covers the formats our clients
+      // actually send (image + video + pdf); anything else stays
+      // application/octet-stream and the receiver renders the generic-file
+      // bubble.
       String mimeType = 'application/octet-stream';
-      if (content.filename.endsWith('.png')) {
+      final lowerName = content.filename.toLowerCase();
+      if (lowerName.endsWith('.png')) {
         mimeType = 'image/png';
-      } else if (content.filename.endsWith('.jpg') || content.filename.endsWith('.jpeg')) {
+      } else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
         mimeType = 'image/jpeg';
-      } else if (content.filename.endsWith('.gif')) {
+      } else if (lowerName.endsWith('.gif')) {
         mimeType = 'image/gif';
-      } else if (content.filename.endsWith('.pdf')) {
+      } else if (lowerName.endsWith('.webp')) {
+        mimeType = 'image/webp';
+      } else if (lowerName.endsWith('.heic') || lowerName.endsWith('.heif')) {
+        mimeType = 'image/heic';
+      } else if (lowerName.endsWith('.mp4')) {
+        mimeType = 'video/mp4';
+      } else if (lowerName.endsWith('.mov')) {
+        mimeType = 'video/quicktime';
+      } else if (lowerName.endsWith('.webm')) {
+        mimeType = 'video/webm';
+      } else if (lowerName.endsWith('.m4v')) {
+        mimeType = 'video/x-m4v';
+      } else if (lowerName.endsWith('.pdf')) {
         mimeType = 'application/pdf';
       }
 

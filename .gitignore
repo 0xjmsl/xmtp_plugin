@@ -10,3 +10,7 @@ web/node_modules/
 web/dist/
 web/package-lock.json
 test_app/web/xmtp/
+
+# Internal assistant notes — never publish to git or pub.dev.
+CLAUDE.md
+.claude/
