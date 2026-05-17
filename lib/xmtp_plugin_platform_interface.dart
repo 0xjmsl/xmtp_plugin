@@ -251,4 +251,32 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) {
     throw UnimplementedError('changeRecoveryIdentifier() has not been implemented.');
   }
+
+  // ============================================================================
+  // PUSH NOTIFICATIONS (subscription registration + push-arrival decryption)
+  // ============================================================================
+
+  /// Aggregate HMAC keys for every conversation the client knows about (including
+  /// stitched duplicate DMs). Each entry: `{topic: String, hmacKey: Uint8List,
+  /// thirtyDayPeriodsSinceEpoch: int}`. libxmtp returns 3 keys per conversation
+  /// (prior / current / next epoch). Feed these to the notif server's
+  /// `subscribeWithMetadata` so it can filter listener traffic without breaking E2E.
+  Future<List<Map<String, dynamic>>> getAllHmacKeys() {
+    throw UnimplementedError('getAllHmacKeys() has not been implemented.');
+  }
+
+  /// Decrypt an FCM/APNs push payload for an existing conversation (looked up by topic).
+  /// Returns a list of decoded messages — usually 1, occasionally more if the
+  /// envelope contained multiple. Each entry mirrors `getMessagesAfterDate` shape.
+  Future<List<Map<String, dynamic>>> processPushMessage(String topic, Uint8List encryptedBytes) {
+    throw UnimplementedError('processPushMessage() has not been implemented.');
+  }
+
+  /// Decrypt an FCM/APNs push payload that arrived on the welcome topic
+  /// (`/xmtp/mls/1/w-${installationId}/proto`). Returns the newly-created
+  /// conversation(s) — usually 1, occasionally more from DM stitching.
+  /// Each entry mirrors `listConversations` shape.
+  Future<List<Map<String, dynamic>>> processWelcome(Uint8List encryptedBytes) {
+    throw UnimplementedError('processWelcome() has not been implemented.');
+  }
 }

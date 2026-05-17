@@ -444,4 +444,130 @@ class XmtpPlugin {
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) async {
     return _platform.changeRecoveryIdentifier(signerPrivateKey, newRecoveryIdentifier);
   }
+
+  // ============================================================================
+  // PUSH NOTIFICATIONS
+  // ============================================================================
+
+  /// Aggregate HMAC keys for every conversation the client knows about
+  /// (including stitched duplicate DMs). Each entry has the topic in full
+  /// XMTP wire format (`/xmtp/mls/1/g-${hex}/proto`), the HMAC key bytes, and
+  /// the 30-day epoch counter. libxmtp returns three entries per conversation
+  /// (prior epoch, current, next).
+  ///
+  /// Most consumers want [getAllPushTopics] instead — it groups these into
+  /// one subscription per topic with all three HMAC keys attached, plus the
+  /// welcome topic, in the exact shape the notification server expects.
+  Future<List<PushHmacKeyEntry>> getAllHmacKeys() async {
+    final raw = await _platform.getAllHmacKeys();
+    return raw
+        .map((m) => PushHmacKeyEntry(
+              topic: m['topic'] as String,
+              hmacKey: m['hmacKey'] is Uint8List
+                  ? m['hmacKey'] as Uint8List
+                  : Uint8List.fromList(List<int>.from(m['hmacKey'] as List)),
+              thirtyDayPeriodsSinceEpoch:
+                  (m['thirtyDayPeriodsSinceEpoch'] as num).toInt(),
+            ))
+        .toList();
+  }
+
+  /// Compute this installation's welcome topic, the per-installation topic
+  /// that carries push notifications for brand-new conversations from
+  /// previously-unknown senders. Format: `/xmtp/mls/1/w-${installationId}/proto`.
+  Future<String> getWelcomeTopic() async {
+    final id = await _platform.getInstallationId();
+    return '/xmtp/mls/1/w-$id/proto';
+  }
+
+  /// All push subscriptions for this client, ready to register with the
+  /// notification server's `subscribeWithMetadata` endpoint. One
+  /// [PushSubscription] per conversation topic plus one for the welcome
+  /// topic (which has no HMAC keys — welcome envelopes are decrypted via
+  /// [processWelcome] rather than HMAC-matched).
+  ///
+  /// Topics are in full XMTP wire format throughout.
+  Future<List<PushSubscription>> getAllPushTopics() async {
+    final entries = await getAllHmacKeys();
+    final grouped = <String, List<PushHmacKey>>{};
+    for (final e in entries) {
+      grouped
+          .putIfAbsent(e.topic, () => [])
+          .add(PushHmacKey(
+            key: e.hmacKey,
+            thirtyDayPeriodsSinceEpoch: e.thirtyDayPeriodsSinceEpoch,
+          ));
+    }
+    final subs = grouped.entries
+        .map((kv) => PushSubscription(topic: kv.key, hmacKeys: kv.value))
+        .toList();
+    subs.add(PushSubscription(topic: await getWelcomeTopic(), hmacKeys: const []));
+    return subs;
+  }
+
+  /// Decrypt an FCM/APNs push payload for an existing conversation. `topic`
+  /// is in full XMTP wire format (the value from the push payload's `topic`
+  /// field). Returns a list of decoded messages — usually 1, occasionally
+  /// more if the envelope contained multiple, and empty if it contained no
+  /// application content (commit-only, etc.).
+  Future<List<Map<String, dynamic>>> processPushMessage(
+      String topic, Uint8List encryptedBytes) async {
+    final result = await _platform.processPushMessage(topic, encryptedBytes);
+    return _processMessages(result.map((e) => Map<String, dynamic>.from(e)).toList());
+  }
+
+  /// Decrypt an FCM/APNs push payload that arrived on the welcome topic.
+  /// Creates the new conversation(s) in the local store and returns them —
+  /// usually 1, occasionally more from DM stitching (Rust path only; Android
+  /// and iOS surface a single conversation).
+  Future<List<Map<String, dynamic>>> processWelcome(Uint8List encryptedBytes) async {
+    final result = await _platform.processWelcome(encryptedBytes);
+    return result.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+}
+
+// ============================================================================
+// PUSH NOTIFICATION DATA CLASSES
+// ============================================================================
+
+/// One HMAC key for one conversation topic, valid for a 30-day epoch window.
+/// libxmtp returns three (prior / current / next) per topic so push delivery
+/// keeps matching across the epoch boundary without re-subscribing.
+class PushHmacKey {
+  final Uint8List key;
+  final int thirtyDayPeriodsSinceEpoch;
+
+  const PushHmacKey({
+    required this.key,
+    required this.thirtyDayPeriodsSinceEpoch,
+  });
+}
+
+/// One subscription entry as the XMTP notification server's
+/// `subscribeWithMetadata` expects. [topic] is in full XMTP wire format
+/// (`/xmtp/mls/1/g-${hex}/proto` for groups/DMs, `/xmtp/mls/1/w-${id}/proto`
+/// for the welcome topic). [hmacKeys] is empty for the welcome topic.
+class PushSubscription {
+  final String topic;
+  final List<PushHmacKey> hmacKeys;
+
+  const PushSubscription({
+    required this.topic,
+    required this.hmacKeys,
+  });
+}
+
+/// Flat HMAC-key entry returned by [XmtpPlugin.getAllHmacKeys]. Most consumers
+/// should use [XmtpPlugin.getAllPushTopics] instead, which groups these into
+/// the [PushSubscription] shape ready for the notification server.
+class PushHmacKeyEntry {
+  final String topic;
+  final Uint8List hmacKey;
+  final int thirtyDayPeriodsSinceEpoch;
+
+  const PushHmacKeyEntry({
+    required this.topic,
+    required this.hmacKey,
+    required this.thirtyDayPeriodsSinceEpoch,
+  });
 }

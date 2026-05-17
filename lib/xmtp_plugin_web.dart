@@ -1062,6 +1062,34 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
 
     return value;
   }
+
+  // ============================================================================
+  // PUSH NOTIFICATIONS
+  // ============================================================================
+  // Out of scope for Web — FCM web-push uses service workers, a wildly
+  // different integration shape than the Flutter `firebase_messaging` path
+  // used on Android/iOS. publicos_client's web build does not currently
+  // surface push notifications. If/when we add web push, wire these through
+  // xmtp-js (`@xmtp/browser-sdk` exposes equivalent push APIs).
+
+  @override
+  Future<List<Map<String, dynamic>>> getAllHmacKeys() {
+    throw UnimplementedError(
+        'getAllHmacKeys() is not implemented on Web. FCM web-push is out of scope; use the Android/iOS clients for push notifications.');
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> processPushMessage(
+      String topic, Uint8List encryptedBytes) {
+    throw UnimplementedError(
+        'processPushMessage() is not implemented on Web. FCM web-push is out of scope; use the Android/iOS clients for push notifications.');
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> processWelcome(Uint8List encryptedBytes) {
+    throw UnimplementedError(
+        'processWelcome() is not implemented on Web. FCM web-push is out of scope; use the Android/iOS clients for push notifications.');
+  }
 }
 
 // ============================================================================

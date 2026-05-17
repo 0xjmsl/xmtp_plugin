@@ -540,4 +540,31 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
     }
     return value;
   }
+
+  // ============================================================================
+  // PUSH NOTIFICATIONS
+  // ============================================================================
+
+  @override
+  Future<List<Map<String, dynamic>>> getAllHmacKeys() async {
+    final List<dynamic> result = await methodChannel.invokeMethod('getAllHmacKeys');
+    return result.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> processPushMessage(String topic, Uint8List encryptedBytes) async {
+    final List<dynamic> result = await methodChannel.invokeMethod('processPushMessage', {
+      'topic': topic,
+      'encryptedBytes': encryptedBytes,
+    });
+    return result.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> processWelcome(Uint8List encryptedBytes) async {
+    final List<dynamic> result = await methodChannel.invokeMethod('processWelcome', {
+      'encryptedBytes': encryptedBytes,
+    });
+    return result.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
 }

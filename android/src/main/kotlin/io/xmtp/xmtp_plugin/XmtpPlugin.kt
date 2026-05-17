@@ -550,6 +550,29 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
         // Not supported on Android - only on web/JS
         result.error("UNSUPPORTED_PLATFORM", "changeRecoveryIdentifier is only supported on web platforms", null)
       }
+      // ============================================================================
+      // PUSH NOTIFICATIONS
+      // ============================================================================
+      "getAllHmacKeys" -> {
+        getAllHmacKeys(result)
+      }
+      "processPushMessage" -> {
+        val topic = call.argument<String>("topic")
+        val encryptedBytes = call.argument<ByteArray>("encryptedBytes")
+        if (topic != null && encryptedBytes != null) {
+          processPushMessage(topic, encryptedBytes, result)
+        } else {
+          result.error("INVALID_ARGUMENTS", "topic and encryptedBytes are required", null)
+        }
+      }
+      "processWelcome" -> {
+        val encryptedBytes = call.argument<ByteArray>("encryptedBytes")
+        if (encryptedBytes != null) {
+          processWelcome(encryptedBytes, result)
+        } else {
+          result.error("INVALID_ARGUMENTS", "encryptedBytes is required", null)
+        }
+      }
       else -> {
         result.notImplemented()
       }
@@ -1707,6 +1730,116 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
         result.success(null)
       } catch (e: Exception) {
         result.error("STATIC_DELETE_DB_FAILED", e.message, null)
+      }
+    }
+  }
+
+  // ============================================================================
+  // PUSH NOTIFICATIONS
+  // ============================================================================
+
+  /// Aggregate HMAC keys for every conversation, flattened to a list of
+  /// {topic, hmacKey, thirtyDayPeriodsSinceEpoch} entries. Topics are in the
+  /// full XMTP wire format (`/xmtp/mls/1/g-${hex}/proto`) ready for the notif
+  /// server's subscribeWithMetadata endpoint.
+  private fun getAllHmacKeys(result: Result) {
+    scope.launch {
+      try {
+        val response = client?.conversations?.getHmacKeys()
+        val flat = mutableListOf<Map<String, Any?>>()
+        response?.hmacKeysMap?.forEach { (topic, hmacKeys) ->
+          hmacKeys.valuesList.forEach { kd ->
+            flat.add(mapOf(
+              "topic" to topic,
+              "hmacKey" to kd.hmacKey.toByteArray(),
+              "thirtyDayPeriodsSinceEpoch" to kd.thirtyDayPeriodsSinceEpoch.toLong()
+            ))
+          }
+        }
+        result.success(flat)
+      } catch (e: Exception) {
+        result.error("GET_HMAC_KEYS_FAILED", e.message, null)
+      }
+    }
+  }
+
+  /// Decrypt an FCM/APNs push payload for an existing conversation. Topic is
+  /// in full XMTP wire format (the value the push payload's `topic` field
+  /// carries). Returns a list with 0 or 1 decoded messages (xmtp-android's
+  /// processMessage returns a single nullable DecodedMessage).
+  private fun processPushMessage(topic: String, encryptedBytes: ByteArray, result: Result) {
+    scope.launch {
+      try {
+        val conversation = client?.conversations?.findConversationByTopic(topic)
+        if (conversation == null) {
+          result.error("CONVERSATION_NOT_FOUND", "No local conversation for topic $topic", null)
+          return@launch
+        }
+        val decoded = conversation.processMessage(encryptedBytes)
+        if (decoded == null) {
+          result.success(emptyList<Map<String, Any?>>())
+          return@launch
+        }
+        val memberInfos = conversation.members().map { member ->
+          mapOf(
+            "inboxId" to member.inboxId,
+            "addresses" to member.identities.first().identifier
+          )
+        }
+        val messageMap = mapOf(
+          "id" to decoded.id,
+          "body" to decoded.body,
+          "sent" to decoded.sentAt.time,
+          "conversationTopic" to decoded.topic,
+          "senderInboxId" to decoded.senderInboxId,
+          "encodedContent" to decoded.encodedContent.toByteArray(),
+          "members" to memberInfos
+        )
+        result.success(listOf(messageMap))
+      } catch (e: Exception) {
+        result.error("PROCESS_PUSH_MESSAGE_FAILED", e.message, null)
+      }
+    }
+  }
+
+  /// Decrypt an FCM/APNs push payload that arrived on the welcome topic.
+  /// Creates the new conversation locally and returns its info. Returns a list
+  /// with 1 entry (xmtp-android's fromWelcome returns a single Conversation).
+  private fun processWelcome(encryptedBytes: ByteArray, result: Result) {
+    scope.launch {
+      try {
+        val conversation = client?.conversations?.fromWelcome(encryptedBytes)
+        if (conversation == null) {
+          result.error("PROCESS_WELCOME_FAILED", "Client not initialized", null)
+          return@launch
+        }
+        val memberInfos = conversation.members().map { member ->
+          mapOf(
+            "inboxId" to member.inboxId,
+            "addresses" to member.identities.first().identifier
+          )
+        }
+        val baseMap = mutableMapOf<String, Any?>(
+          "id" to conversation.id,
+          "topic" to conversation.topic,
+          "createdAt" to conversation.createdAt.time,
+          "members" to memberInfos
+        )
+        when (conversation) {
+          is Conversation.Dm -> {
+            baseMap["conversationType"] = "dm"
+            baseMap["peerInboxId"] = conversation.dm.peerInboxId
+          }
+          is Conversation.Group -> {
+            baseMap["conversationType"] = "group"
+            baseMap["name"] = conversation.group.name
+            baseMap["imageUrlSquare"] = conversation.group.imageUrl
+            baseMap["description"] = conversation.group.description
+          }
+        }
+        result.success(listOf(baseMap))
+      } catch (e: Exception) {
+        result.error("PROCESS_WELCOME_FAILED", e.message, null)
       }
     }
   }

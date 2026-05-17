@@ -1,3 +1,31 @@
+## 1.0.6
+
+### Push notifications surface
+
+Five new APIs that wire `xmtp_plugin` consumers to an `xmtp/example-notification-server-go`-compatible push notification stack across Android, iOS, and Windows. Web throws `UnimplementedError` (FCM web-push is out of scope — service-worker integration is a wildly different shape than the Flutter `firebase_messaging` path; revisit if/when a consumer needs it).
+
+* **`Future<List<PushHmacKeyEntry>> getAllHmacKeys()`** — aggregate HMAC keys for every conversation, including stitched duplicate DMs. libxmtp returns three keys per conversation (prior / current / next 30-day epoch) so push delivery keeps matching across epoch boundaries without re-subscribing.
+
+* **`Future<String> getWelcomeTopic()`** — this installation's per-installation welcome topic. Format `/xmtp/mls/1/w-${installationId}/proto`. Required to receive push for brand-new conversations from previously-unknown senders (the welcome envelope arrives on this topic before any per-conversation topic exists).
+
+* **`Future<List<PushSubscription>> getAllPushTopics()`** — convenience composition over `getAllHmacKeys()` + `getWelcomeTopic()`. Returns one `PushSubscription` per conversation topic (with all three HMAC keys attached) plus one entry for the welcome topic (with empty HMAC list). This is the exact shape the notification server's `subscribeWithMetadata` endpoint expects.
+
+* **`Future<List<Map<String, dynamic>>> processPushMessage(String topic, Uint8List encryptedBytes)`** — decrypt an FCM/APNs push payload for an existing conversation. `topic` is in full XMTP wire format (the value the push payload's `topic` field carries). Returns 0 or 1 messages (libxmtp may surface multiple from a single envelope on Rust path; Android/iOS bindings collapse to a single optional).
+
+* **`Future<List<Map<String, dynamic>>> processWelcome(Uint8List encryptedBytes)`** — decrypt an FCM/APNs push payload that arrived on the welcome topic. Creates the new conversation locally and returns its info. Returns 1 entry on Android/iOS; Rust path may return more from DM-stitching welcomes.
+
+### Topic format convention
+
+Push APIs deal in the **full XMTP wire topic format** (`/xmtp/mls/1/g-${hex}/proto`, `/xmtp/mls/1/w-${id}/proto`) end-to-end, because that is what both the notification server and FCM/APNs push payloads use. This intentionally diverges from the rest of the plugin's Rust API surface (raw hex group_ids), and matches what the official `xmtp-android` and `xmtp-ios` push examples do.
+
+### Internal: Rust bridge module
+
+New `rust/src/api/push.rs` exposes three libxmtp methods via flutter_rust_bridge: `get_all_hmac_keys()` (flattens libxmtp's `HashMap<group_id, Vec<HmacKey>>` into `Vec<HmacKeyEntry>`), `process_push_message(topic, bytes)` (calls `group.process_streamed_group_message`), `process_welcome(bytes)` (calls `client.process_streamed_welcome_message`). Includes `format_group_topic` / `parse_group_topic` topic-format helpers with unit tests.
+
+### Internal: `ConversationInfo` map now includes `conversationType`
+
+The Windows path's `_conversationInfoToMap` now includes the always-populated `conversationType` field (`"dm"` or `"group"`) from the Rust `ConversationInfo` struct. Pre-existing gap, surfaced while wiring `processWelcome`'s result through the same helper. Android + iOS already returned this field via their native listGroups / listDms paths; Windows was the outlier.
+
 ## 1.0.5
 
 ### Cross-client interoperability for `RemoteStaticAttachment`

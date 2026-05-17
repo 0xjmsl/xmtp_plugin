@@ -5,4 +5,5 @@ pub mod groups;
 pub mod helpers;
 pub mod inbox;
 pub mod messaging;
+pub mod push;
 pub mod signing;

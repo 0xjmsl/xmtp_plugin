@@ -427,6 +427,29 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             // Not supported on iOS - only on web/JS
             result(FlutterError(code: "UNSUPPORTED_PLATFORM", message: "changeRecoveryIdentifier is only supported on web platforms", details: nil))
 
+        // ========================================================================
+        // PUSH NOTIFICATIONS
+        // ========================================================================
+        case "getAllHmacKeys":
+            getAllHmacKeys(result: result)
+
+        case "processPushMessage":
+            guard let args = call.arguments as? [String: Any],
+                  let topic = args["topic"] as? String,
+                  let encryptedBytes = args["encryptedBytes"] as? FlutterStandardTypedData else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "topic and encryptedBytes are required", details: nil))
+                return
+            }
+            processPushMessage(topic: topic, encryptedBytes: encryptedBytes.data, result: result)
+
+        case "processWelcome":
+            guard let args = call.arguments as? [String: Any],
+                  let encryptedBytes = args["encryptedBytes"] as? FlutterStandardTypedData else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "encryptedBytes is required", details: nil))
+                return
+            }
+            processWelcome(encryptedBytes: encryptedBytes.data, result: result)
+
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -1988,6 +2011,145 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             } catch {
                 DispatchQueue.main.async {
                     result(FlutterError(code: "STATIC_DELETE_DB_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // MARK: - Push Notifications
+    // ========================================================================
+
+    /// Aggregate HMAC keys flattened to a list of
+    /// `{topic, hmacKey, thirtyDayPeriodsSinceEpoch}` entries. Topics are in
+    /// the full XMTP wire format (`/xmtp/mls/1/g-${hex}/proto`) ready for the
+    /// notif server's subscribeWithMetadata endpoint.
+    private func getAllHmacKeys(result: @escaping FlutterResult) {
+        guard let client = client else {
+            result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))
+            return
+        }
+
+        Task {
+            do {
+                let response = try client.conversations.getHmacKeys()
+                var flat: [[String: Any]] = []
+                for (topic, hmacKeys) in response.hmacKeys {
+                    for kd in hmacKeys.values {
+                        flat.append([
+                            "topic": topic,
+                            "hmacKey": FlutterStandardTypedData(bytes: kd.hmacKey),
+                            "thirtyDayPeriodsSinceEpoch": Int64(kd.thirtyDayPeriodsSinceEpoch)
+                        ])
+                    }
+                }
+                DispatchQueue.main.async {
+                    result(flat)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "GET_HMAC_KEYS_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    /// Decrypt an FCM/APNs push payload for an existing conversation. Topic is
+    /// in full XMTP wire format (the value the push payload's `topic` field
+    /// carries). Returns a list with 0 or 1 decoded messages (xmtp-ios's
+    /// processMessage returns a single nullable DecodedMessage).
+    private func processPushMessage(topic: String, encryptedBytes: Data, result: @escaping FlutterResult) {
+        guard let client = client else {
+            result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))
+            return
+        }
+
+        Task {
+            do {
+                guard let conversation = try await client.conversations.findConversationByTopic(topic: topic) else {
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "CONVERSATION_NOT_FOUND", message: "No local conversation for topic \(topic)", details: nil))
+                    }
+                    return
+                }
+                guard let decoded = try await conversation.processMessage(messageBytes: encryptedBytes) else {
+                    DispatchQueue.main.async {
+                        result([] as [[String: Any]])
+                    }
+                    return
+                }
+                let members: [Member]
+                switch conversation {
+                case .dm(let dm):
+                    members = try await dm.members
+                case .group(let group):
+                    members = try await group.members
+                }
+                let map = try self.createMessageMap(message: decoded, members: members, conversationTopic: conversation.topic)
+                DispatchQueue.main.async {
+                    result([map])
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "PROCESS_PUSH_MESSAGE_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    /// Decrypt an FCM/APNs push payload that arrived on the welcome topic.
+    /// Returns a list with 1 entry (xmtp-ios's fromWelcome returns a single
+    /// nullable Conversation; the underlying libxmtp may surface multiple from
+    /// DM-stitching welcomes, of which xmtp-ios surfaces only the first).
+    private func processWelcome(encryptedBytes: Data, result: @escaping FlutterResult) {
+        guard let client = client else {
+            result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))
+            return
+        }
+
+        Task {
+            do {
+                guard let conversation = try await client.conversations.fromWelcome(envelopeBytes: encryptedBytes) else {
+                    DispatchQueue.main.async {
+                        result([] as [[String: Any]])
+                    }
+                    return
+                }
+                var convMap: [String: Any] = [
+                    "id": conversation.id,
+                    "topic": conversation.topic,
+                    "createdAt": Int64(conversation.createdAt.timeIntervalSince1970 * 1000)
+                ]
+                switch conversation {
+                case .dm(let dm):
+                    let members = try await dm.members
+                    convMap["conversationType"] = "dm"
+                    convMap["peerInboxId"] = try dm.peerInboxId
+                    convMap["members"] = members.map { member in
+                        [
+                            "inboxId": member.inboxId,
+                            "addresses": member.identities.first?.identifier as Any
+                        ] as [String: Any]
+                    }
+                case .group(let group):
+                    let members = try await group.members
+                    convMap["conversationType"] = "group"
+                    convMap["name"] = try group.name()
+                    convMap["imageUrlSquare"] = try group.imageUrl()
+                    convMap["description"] = try group.description()
+                    convMap["members"] = members.map { member in
+                        [
+                            "inboxId": member.inboxId,
+                            "addresses": member.identities.first?.identifier as Any
+                        ] as [String: Any]
+                    }
+                }
+                DispatchQueue.main.async {
+                    result([convMap])
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "PROCESS_WELCOME_FAILED", message: error.localizedDescription, details: nil))
                 }
             }
         }

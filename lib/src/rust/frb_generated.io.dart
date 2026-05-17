@@ -9,6 +9,7 @@ import 'api/conversations.dart';
 import 'api/groups.dart';
 import 'api/inbox.dart';
 import 'api/messaging.dart';
+import 'api/push.dart';
 import 'api/signing.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -47,6 +48,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ConversationInfo dco_decode_conversation_info(dynamic raw);
 
   @protected
+  HmacKeyEntry dco_decode_hmac_key_entry(dynamic raw);
+
+  @protected
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
@@ -63,6 +67,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ConversationInfo> dco_decode_list_conversation_info(dynamic raw);
+
+  @protected
+  List<HmacKeyEntry> dco_decode_list_hmac_key_entry(dynamic raw);
 
   @protected
   List<IdentityInfo> dco_decode_list_identity_info(dynamic raw);
@@ -132,6 +139,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ConversationInfo sse_decode_conversation_info(SseDeserializer deserializer);
 
   @protected
+  HmacKeyEntry sse_decode_hmac_key_entry(SseDeserializer deserializer);
+
+  @protected
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
@@ -148,6 +158,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ConversationInfo> sse_decode_list_conversation_info(
+      SseDeserializer deserializer);
+
+  @protected
+  List<HmacKeyEntry> sse_decode_list_hmac_key_entry(
       SseDeserializer deserializer);
 
   @protected
@@ -228,6 +242,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       ConversationInfo self, SseSerializer serializer);
 
   @protected
+  void sse_encode_hmac_key_entry(HmacKeyEntry self, SseSerializer serializer);
+
+  @protected
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
@@ -247,6 +264,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_conversation_info(
       List<ConversationInfo> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_hmac_key_entry(
+      List<HmacKeyEntry> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_identity_info(

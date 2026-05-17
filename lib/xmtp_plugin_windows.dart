@@ -10,6 +10,7 @@ import 'src/rust/api/conversations.dart' as rust_conversations;
 import 'src/rust/api/groups.dart' as rust_groups;
 import 'src/rust/api/consent.dart' as rust_consent;
 import 'src/rust/api/inbox.dart' as rust_inbox;
+import 'src/rust/api/push.dart' as rust_push;
 import 'src/rust/api/signing.dart' as rust_signing;
 import 'src/rust/frb_generated.dart';
 
@@ -627,6 +628,7 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
       'id': conv.id,
       'topic': conv.topic,
       'createdAt': conv.createdAtMs,
+      'conversationType': conv.conversationType,
       'members': conv.members
           .map((m) => {
                 'inboxId': m.inboxId,
@@ -697,5 +699,43 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
     );
 
     return encodedContent.writeToBuffer();
+  }
+
+  // ============================================================================
+  // PUSH NOTIFICATIONS
+  // ============================================================================
+
+  @override
+  Future<List<Map<String, dynamic>>> getAllHmacKeys() async {
+    await _ensureInitialized();
+    final entries = await rust_push.getAllHmacKeys();
+    return entries
+        .map((e) => <String, dynamic>{
+              'topic': e.topic,
+              'hmacKey': e.hmacKey,
+              'thirtyDayPeriodsSinceEpoch': e.thirtyDayPeriodsSinceEpoch,
+            })
+        .toList();
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> processPushMessage(
+      String topic, Uint8List encryptedBytes) async {
+    await _ensureInitialized();
+    final messages = await rust_push.processPushMessage(
+      topic: topic,
+      encryptedBytes: encryptedBytes.toList(),
+    );
+    return messages.map(_messageInfoToMap).toList();
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> processWelcome(
+      Uint8List encryptedBytes) async {
+    await _ensureInitialized();
+    final conversations = await rust_push.processWelcome(
+      encryptedBytes: encryptedBytes.toList(),
+    );
+    return conversations.map(_conversationInfoToMap).toList();
   }
 }
