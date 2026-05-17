@@ -26,8 +26,16 @@ class XmtpPlugin {
     return _platform.generatePrivateKey();
   }
 
-  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey, {String environment = 'production'}) async {
-    final String? address = await _platform.initializeClient(privateKey, dbKey, environment: environment);
+  /// Initialize the XMTP client.
+  ///
+  /// [dbDirectory] (iOS only, optional): override the XMTPiOS DB directory.
+  /// Pass an App Group container path here when sharing the installation DB
+  /// with a Notification Service Extension. Defaults to XMTPiOS's app-scope
+  /// location when null. Ignored on Android/Web/Windows.
+  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey,
+      {String environment = 'production', String? dbDirectory}) async {
+    final String? address = await _platform.initializeClient(privateKey, dbKey,
+        environment: environment, dbDirectory: dbDirectory);
     // Register built-in codecs
     _codecRegistry.registerCodec(TextCodec());
     _codecRegistry.registerCodec(ReplyCodec(_codecRegistry));

@@ -43,7 +43,8 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                 return
             }
             let environment = args["environment"] as? String ?? "production"
-            initializeClient(privateKey: privateKey.data, dbKey: dbKey.data, environment: environment, result: result)
+            let dbDirectory = args["dbDirectory"] as? String
+            initializeClient(privateKey: privateKey.data, dbKey: dbKey.data, environment: environment, dbDirectory: dbDirectory, result: result)
             
         case "getClientAddress":
             getClientAddress(result: result)
@@ -485,7 +486,7 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
         }
     }
 
-    private func initializeClient(privateKey: Data, dbKey: Data, environment: String, result: @escaping FlutterResult) {
+    private func initializeClient(privateKey: Data, dbKey: Data, environment: String, dbDirectory: String?, result: @escaping FlutterResult) {
         Task {
             do {
                 let privateKey = try PrivateKey(privateKey)
@@ -493,13 +494,14 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                 let xmtpEnv = resolveEnvironment(environment)
                 let options = ClientOptions(
                     api: ClientOptions.Api(env: xmtpEnv, isSecure: xmtpEnv != .local),
-                    dbEncryptionKey: dbKey
+                    dbEncryptionKey: dbKey,
+                    dbDirectory: dbDirectory
                 )
-                
+
                 // Register codecs
                 XMTP.Client.register(codec: AttachmentCodec())
                 XMTP.Client.register(codec: RemoteAttachmentCodec())
-                
+
                 let client = try await XMTP.Client.create(account: privateKey, options: options)
                 self.client = client
                 

@@ -23,13 +23,15 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
   }
 
   @override
-  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey, {String environment = 'production'}) async {
+  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey,
+      {String environment = 'production', String? dbDirectory}) async {
     final address = await methodChannel.invokeMethod<String>(
       'initializeClient',
       {
         'privateKey': privateKey,
         'dbKey': dbKey,
         'environment': environment,
+        if (dbDirectory != null) 'dbDirectory': dbDirectory,
       },
     );
     return address;

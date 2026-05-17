@@ -32,7 +32,8 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('generatePrivateKey() has not been implemented.');
   }
 
-  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey, {String environment = 'production'}) {
+  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey,
+      {String environment = 'production', String? dbDirectory}) {
     throw UnimplementedError('initializeClient() has not been implemented.');
   }
 
