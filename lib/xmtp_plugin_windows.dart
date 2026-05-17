@@ -64,7 +64,8 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
   }
 
   @override
-  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey, {String environment = 'production'}) async {
+  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey,
+      {String environment = 'production', String? dbDirectory}) async {
     await _ensureInitialized();
     return rust_client.initializeClient(
       privateKey: privateKey.toList(),
