@@ -66,7 +66,9 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   @override
-  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey, {String environment = 'production'}) async {
+  Future<String?> initializeClient(Uint8List privateKey, Uint8List dbKey,
+      {String environment = 'production', String? dbDirectory}) async {
+    // dbDirectory is iOS-only; ignored on web.
     try {
       final params = <String, dynamic>{
         'privateKey': privateKey.toList(),
