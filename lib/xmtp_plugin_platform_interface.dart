@@ -245,7 +245,7 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('staticGetInboxIdForAddress() has not been implemented.');
   }
 
-  Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production'}) {
+  Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production', String? dbDirectory}) {
     throw UnimplementedError('staticDeleteLocalDatabase() has not been implemented.');
   }
 

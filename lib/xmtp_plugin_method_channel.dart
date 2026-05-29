@@ -505,11 +505,12 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
   }
 
   @override
-  Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production'}) async {
+  Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production', String? dbDirectory}) async {
     await methodChannel.invokeMethod('staticDeleteLocalDatabase', {
       'address': address,
       'inboxId': inboxId,
       'environment': environment,
+      if (dbDirectory != null) 'dbDirectory': dbDirectory,
     });
   }
 

@@ -569,7 +569,9 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
 
   @override
   Future<void> staticDeleteLocalDatabase(String address, String inboxId,
-      {String environment = 'production'}) async {
+      {String environment = 'production', String? dbDirectory}) async {
+    // dbDirectory is iOS-only (App Group sharing); the Rust/Windows path
+    // derives its own DB location from the address.
     await _ensureInitialized();
     await rust_client.staticDeleteLocalDatabase(
       address: address,

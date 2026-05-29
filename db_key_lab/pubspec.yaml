@@ -1,0 +1,22 @@
+name: db_key_lab
+description: "Standalone on-device lab for the XMTP key + DB-key lifecycle (generate / import / export / init / delete-local-db / mismatch-recovery). Imports xmtp_plugin directly via a path dependency."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  xmtp_plugin:
+    path: ../
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

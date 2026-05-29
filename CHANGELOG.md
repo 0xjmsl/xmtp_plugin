@@ -1,3 +1,16 @@
+## 1.0.7
+
+### Fix: `staticDeleteLocalDatabase` now honors the custom `dbDirectory`
+
+`staticDeleteLocalDatabase` gained an optional `dbDirectory` parameter that mirrors the one on `initializeClient`. On iOS the previous implementation always deleted from the app's Documents directory, but XMTPiOS stores the encrypted `xmtp-<env>-<inboxId>.db3` under whatever `dbDirectory` the client was opened with. Consumers that share the installation DB with a Notification Service Extension via an App Group container were therefore deleting a file that did not exist while the real DB survived — so a DB-key-mismatch recovery ("erase & continue") silently failed and the next `initializeClient` hit the same mismatch.
+
+The iOS implementation now:
+* deletes from `dbDirectory ?? Documents` so it matches the create-time path;
+* removes the **legacy alias** (`xmtp-<legacyEnv>-<inboxId>.db3`) XMTPiOS falls back to reading, not just the current one;
+* cleans up SQLite sidecars with the correct hyphenated `-wal` / `-shm` names (older builds used `.wal` / `.shm`, leaking the journals).
+
+Callers that pass a `dbDirectory` to `initializeClient` MUST pass the same value here. Android (DB always under the app files dir) and Web/Windows ignore the new parameter; the change is fully backward-compatible.
+
 ## 1.0.6
 
 ### Push notifications surface

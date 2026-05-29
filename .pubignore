@@ -9,4 +9,5 @@ web/node_modules/
 web/dist/
 example/android/local.properties
 test_app/
+db_key_lab/
 *.lock

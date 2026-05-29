@@ -422,7 +422,8 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                 return
             }
             let environment = args["environment"] as? String ?? "production"
-            staticDeleteLocalDatabase(inboxId: inboxId, environment: environment, result: result)
+            let dbDirectory = args["dbDirectory"] as? String
+            staticDeleteLocalDatabase(inboxId: inboxId, environment: environment, dbDirectory: dbDirectory, result: result)
 
         case "changeRecoveryIdentifier":
             // Not supported on iOS - only on web/JS
@@ -1987,25 +1988,49 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
         }
     }
 
-    private func staticDeleteLocalDatabase(inboxId: String, environment: String, result: @escaping FlutterResult) {
+    private func staticDeleteLocalDatabase(inboxId: String, environment: String, dbDirectory: String?, result: @escaping FlutterResult) {
         Task {
             do {
                 let env = resolveEnvironment(environment)
-                let alias = "xmtp-\(env.rawValue)-\(inboxId).db3"
-                let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                let dbURL = docsDir.appendingPathComponent(alias)
                 let fm = FileManager.default
-                if fm.fileExists(atPath: dbURL.path) {
-                    try fm.removeItem(at: dbURL)
+
+                // Mirror the directory XMTPiOS picks at create time
+                // (`initFFiClient` in XMTPiOS/Client.swift): the caller-provided
+                // dbDirectory when set — e.g. an App Group container shared with a
+                // Notification Service Extension — otherwise the Documents dir.
+                // Deleting only Documents while the client opened the DB in an App
+                // Group container is a silent no-op and was why "erase & continue"
+                // failed to clear a wrong-key DB.
+                let baseDir: URL
+                if let dbDirectory = dbDirectory {
+                    baseDir = URL(fileURLWithPath: dbDirectory, isDirectory: true)
+                } else {
+                    baseDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
                 }
-                // Also clean up WAL/SHM if present
-                let walURL = dbURL.appendingPathExtension("wal")
-                if fm.fileExists(atPath: walURL.path) {
-                    try fm.removeItem(at: walURL)
-                }
-                let shmURL = dbURL.appendingPathExtension("shm")
-                if fm.fileExists(atPath: shmURL.path) {
-                    try fm.removeItem(at: shmURL)
+
+                // The current alias plus the legacy alias XMTPiOS falls back to
+                // reading when the current one is absent — delete both so a stale
+                // legacy DB can't keep triggering the key mismatch.
+                let aliases = [
+                    "xmtp-\(env.rawValue)-\(inboxId).db3",
+                    "xmtp-\(Self.legacyRawValue(env))-\(inboxId).db3",
+                ]
+
+                for alias in aliases {
+                    let dbURL = baseDir.appendingPathComponent(alias)
+                    // Main DB + SQLite sidecars. SQLite names WAL/SHM with a
+                    // hyphen (`<db>-wal` / `<db>-shm`); older plugin builds wrote
+                    // `.wal` / `.shm` with a dot, so remove both spellings.
+                    let candidates = [
+                        dbURL.path,
+                        dbURL.path + "-wal",
+                        dbURL.path + "-shm",
+                        dbURL.appendingPathExtension("wal").path,
+                        dbURL.appendingPathExtension("shm").path,
+                    ]
+                    for path in candidates where fm.fileExists(atPath: path) {
+                        try fm.removeItem(atPath: path)
+                    }
                 }
                 DispatchQueue.main.async {
                     result(nil)
@@ -2015,6 +2040,17 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                     result(FlutterError(code: "STATIC_DELETE_DB_FAILED", message: error.localizedDescription, details: nil))
                 }
             }
+        }
+    }
+
+    /// XMTPiOS's `XMTPEnvironment.legacyRawValue` is internal to the SDK module,
+    /// so replicate it here to reconstruct the legacy DB alias.
+    private static func legacyRawValue(_ env: XMTPEnvironment) -> String {
+        switch env {
+        case .local: return "localhost:5556"
+        case .dev: return "grpc.dev.xmtp.network:443"
+        case .production: return "grpc.production.xmtp.network:443"
+        @unknown default: return env.rawValue
         }
     }
 

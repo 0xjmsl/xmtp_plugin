@@ -5,6 +5,8 @@ pubspec.lock
 example/pubspec.lock
 test_app/pubspec.lock
 test_app/build/
+db_key_lab/pubspec.lock
+db_key_lab/build/
 *.iml
 web/node_modules/
 web/dist/

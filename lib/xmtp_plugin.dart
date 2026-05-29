@@ -441,12 +441,22 @@ class XmtpPlugin {
   /// Delete the local XMTP database files for a given address/inboxId.
   /// Each platform uses the parameters it needs to construct the DB path.
   /// Does NOT require an initialized client.
+  ///
+  /// [dbDirectory] MUST match the value passed to [initializeClient] for this
+  /// identity. On iOS the SDK stores the DB at
+  /// `<dbDirectory ?? Documents>/xmtp-<env>-<inboxId>.db3`; if the client was
+  /// opened with a custom directory (e.g. an App Group container shared with a
+  /// Notification Service Extension) the delete MUST target that same
+  /// directory or it silently removes nothing and a wrong-key DB survives.
+  /// Ignored on Android (the DB always lives under the app's files dir).
   static Future<void> staticDeleteLocalDatabase(
     String address,
     String inboxId, {
     String environment = 'production',
+    String? dbDirectory,
   }) async {
-    return XmtpPluginPlatform.instance.staticDeleteLocalDatabase(address, inboxId, environment: environment);
+    return XmtpPluginPlatform.instance.staticDeleteLocalDatabase(address, inboxId,
+        environment: environment, dbDirectory: dbDirectory);
   }
 
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) async {

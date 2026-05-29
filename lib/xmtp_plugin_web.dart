@@ -974,7 +974,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
 
   @override
   Future<void> staticDeleteLocalDatabase(String address, String inboxId,
-      {String environment = 'production'}) async {
+      {String environment = 'production', String? dbDirectory}) async {
     throw UnimplementedError('staticDeleteLocalDatabase is not available on web');
   }
 
