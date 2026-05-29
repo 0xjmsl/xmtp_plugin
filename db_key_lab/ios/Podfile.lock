@@ -1,0 +1,49 @@
+PODS:
+  - Connect-Swift (1.2.1):
+    - SwiftProtobuf (~> 1.30.0)
+  - CryptoSwift (1.8.3)
+  - Flutter (1.0.0)
+  - SQLCipher (4.5.7):
+    - SQLCipher/standard (= 4.5.7)
+  - SQLCipher/common (4.5.7)
+  - SQLCipher/standard (4.5.7):
+    - SQLCipher/common
+  - SwiftProtobuf (1.30.0)
+  - XMTP (4.9.0):
+    - Connect-Swift (~> 1.2.0)
+    - CryptoSwift (= 1.8.3)
+    - SQLCipher (= 4.5.7)
+  - xmtp_plugin (1.0.0):
+    - Flutter
+    - XMTP (~> 4.0)
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - xmtp_plugin (from `.symlinks/plugins/xmtp_plugin/ios`)
+
+SPEC REPOS:
+  trunk:
+    - Connect-Swift
+    - CryptoSwift
+    - SQLCipher
+    - SwiftProtobuf
+    - XMTP
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  xmtp_plugin:
+    :path: ".symlinks/plugins/xmtp_plugin/ios"
+
+SPEC CHECKSUMS:
+  Connect-Swift: 8550afdb45aaea9f527d29c74f7224bf78e2bc26
+  CryptoSwift: 967f37cea5a3294d9cce358f78861652155be483
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  SQLCipher: 5e6bfb47323635c8b657b1b27d25c5f1baf63bf5
+  SwiftProtobuf: 3697407f0d5b23bedeba9c2eaaf3ec6fdff69349
+  XMTP: 322f5be971dca2b1f402727ffda2f62d4ab7f71d
+  xmtp_plugin: 0a36caf210771d9872ff925927d3577feab18a01
+
+PODFILE CHECKSUM: 6c01055ff966e40e8862373e66668a0fbf0b7ba8
+
+COCOAPODS: 1.16.2
