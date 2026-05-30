@@ -161,9 +161,19 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
       final result = await _promiseToFuture(
         _clientManager.sendMessageByInboxId(params),
       );
+      final messageId = (result as JSString?)?.toDart;
 
-      // Web JS bridge returns the message id only; topic-healing is iOS-driven.
-      return {'messageId': (result as JSString?)?.toDart, 'topic': null};
+      // Resolve the live DM topic so the Dart layer can heal a stale cached
+      // topic (parity with iOS/Android/Windows). Reuses the same
+      // find-or-create the send used. Best-effort: a miss just skips healing.
+      String? liveTopic;
+      try {
+        final dm = await findOrCreateDMWithInboxId(recipientInboxId);
+        liveTopic = dm['topic'] as String?;
+      } catch (_) {
+        liveTopic = null;
+      }
+      return {'messageId': messageId, 'topic': liveTopic};
     } catch (e) {
       throw Exception('Failed to send message by inbox ID: $e');
     }

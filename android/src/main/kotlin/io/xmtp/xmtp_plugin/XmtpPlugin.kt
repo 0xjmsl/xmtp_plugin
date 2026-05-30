@@ -723,7 +723,16 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
               val sendResult = conversation?.send(encodedContent)
               println("Android Send result: $sendResult")
 
-              result.success(sendResult)
+              // Return the live DM topic alongside the message id so the Dart
+              // layer can heal a stale cached topic. `conversation` is the live
+              // DM for this inbox, so `topic` is always the canonical one.
+              // (Dart's method channel tolerates both this map and the legacy
+              // String return.)
+              val payload = mapOf(
+                  "messageId" to sendResult,
+                  "topic" to conversation?.topic,
+              )
+              result.success(payload)
           } catch (e: Exception) {
               result.error("MESSAGE_SEND_FAILED", e.message, null)
           }

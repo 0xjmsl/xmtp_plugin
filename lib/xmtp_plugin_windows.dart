@@ -110,8 +110,20 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
         versionMajor);
     final messageId = await rust_messaging.sendMessageByInboxId(
         inboxId: recipientInboxId, contentBytes: contentBytes);
-    // Rust bridge returns the message id only; topic-healing is iOS-driven.
-    return {'messageId': messageId, 'topic': null};
+    // Resolve the live DM topic so the Dart layer can heal a stale cached
+    // topic (parity with iOS/Android). Reuses the same find-or-create the
+    // send used — idempotent and local after the first call — so no Rust
+    // bridge change/codegen is needed. Best-effort: a lookup failure just
+    // skips healing rather than failing the send.
+    String? liveTopic;
+    try {
+      final dm = await rust_conversations.findOrCreateDmWithInboxId(
+          inboxId: recipientInboxId);
+      liveTopic = dm.topic;
+    } catch (_) {
+      liveTopic = null;
+    }
+    return {'messageId': messageId, 'topic': liveTopic};
   }
 
   @override
