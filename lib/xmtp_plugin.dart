@@ -41,6 +41,7 @@ class XmtpPlugin {
     _codecRegistry.registerCodec(ReplyCodec(_codecRegistry));
     _codecRegistry.registerCodec(ReadReceiptCodec());
     _codecRegistry.registerCodec(TransactionReferenceCodec());
+    _codecRegistry.registerCodec(WalletSendCallsCodec());
     _codecRegistry.registerCodec(DeleteMessageCodec());
     _codecRegistry.registerCodec(LeaveRequestCodec());
     _codecRegistry.registerCodec(MultiRemoteAttachmentCodec());

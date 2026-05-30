@@ -1266,51 +1266,89 @@ class ReadReceiptCodec extends XMTPCodec {
 
 // ============================================================================
 // Transaction Reference — JSON wire format (xmtp.org/transactionReference/1.0)
+// ----------------------------------------------------------------------------
+// XIP-21. Canonical reference: libxmtp
+//   crates/xmtp_content_types/src/transaction_reference.rs
+// Canonical wire shape is a FLAT JSON object (NOT wrapped):
+//   { namespace?, networkId, reference, metadata? }
+// where metadata = { transactionType, currency, amount, decimals,
+//                    fromAddress, toAddress }.
+//
+// ENCODE is canonical-compliant (flat, only set fields emitted), so what we
+// send interoperates with libxmtp / xmtp-js / Base.
+// DECODE is deliberately lenient (Postel's law): real-world senders (e.g. Base
+// payment agents) have been observed emitting the payload WRAPPED under a
+// "transactionReference" key and with PARTIAL metadata. We unwrap, treat every
+// metadata field as optional, accept networkId as string-or-number, and keep
+// any unknown keys in `extra` so nothing is silently dropped.
 // ============================================================================
 
-/// Optional metadata for a transaction reference
+/// Optional metadata for a transaction reference.
+///
+/// Canonical libxmtp lists all six fields, but we keep them optional on decode
+/// for non-conformant senders. `extra` preserves any keys outside the canonical
+/// schema so they can still be displayed.
 class TransactionMetadata {
-  final String transactionType;
-  final String currency;
-  final double amount;
-  final int decimals;
-  final String fromAddress;
-  final String toAddress;
+  final String? transactionType;
+  final String? currency;
+  final double? amount;
+  final int? decimals;
+  final String? fromAddress;
+  final String? toAddress;
+  final Map<String, dynamic> extra;
 
   TransactionMetadata({
-    required this.transactionType,
-    required this.currency,
-    required this.amount,
-    required this.decimals,
-    required this.fromAddress,
-    required this.toAddress,
+    this.transactionType,
+    this.currency,
+    this.amount,
+    this.decimals,
+    this.fromAddress,
+    this.toAddress,
+    this.extra = const {},
   });
+
+  static const _known = {
+    'transactionType', 'currency', 'amount', 'decimals', 'fromAddress',
+    'toAddress',
+  };
 
   factory TransactionMetadata.fromJson(Map<String, dynamic> json) {
     return TransactionMetadata(
-      transactionType: json['transactionType'] as String,
-      currency: json['currency'] as String,
-      amount: (json['amount'] as num).toDouble(),
-      decimals: (json['decimals'] as num).toInt(),
-      fromAddress: json['fromAddress'] as String,
-      toAddress: json['toAddress'] as String,
+      transactionType: json['transactionType'] as String?,
+      currency: json['currency'] as String?,
+      amount: (json['amount'] as num?)?.toDouble(),
+      decimals: (json['decimals'] as num?)?.toInt(),
+      fromAddress: json['fromAddress'] as String?,
+      toAddress: json['toAddress'] as String?,
+      extra: {
+        for (final e in json.entries)
+          if (!_known.contains(e.key)) e.key: e.value,
+      },
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'transactionType': transactionType,
-        'currency': currency,
-        'amount': amount,
-        'decimals': decimals,
-        'fromAddress': fromAddress,
-        'toAddress': toAddress,
+        if (transactionType != null) 'transactionType': transactionType,
+        if (currency != null) 'currency': currency,
+        if (amount != null) 'amount': amount,
+        if (decimals != null) 'decimals': decimals,
+        if (fromAddress != null) 'fromAddress': fromAddress,
+        if (toAddress != null) 'toAddress': toAddress,
+        ...extra,
       };
+
+  @override
+  String toString() => 'TransactionMetadata(${toJson()})';
 }
 
-/// A reference to an on-chain transaction
+/// A reference to an on-chain transaction (a receipt).
 class TransactionReference {
   final String? namespace;
+
+  /// Chain id, normalized to a string (the wire allows string or number).
   final String networkId;
+
+  /// The on-chain transaction hash.
   final String reference;
   final TransactionMetadata? metadata;
 
@@ -1322,17 +1360,28 @@ class TransactionReference {
   });
 
   factory TransactionReference.fromJson(Map<String, dynamic> json) {
-    // networkId can be string or number in the wire format
-    final rawNetworkId = json['networkId'];
-    final networkId = rawNetworkId is String ? rawNetworkId : rawNetworkId.toString();
+    // Tolerate a wrapped envelope: some senders (e.g. Base payment agents) emit
+    // {"transactionReference": {...}} instead of the canonical flat object.
+    // Keeping this here means both the codec and any reload-from-storage path
+    // share one wire-tolerant entry point.
+    final inner = json['transactionReference'];
+    final obj = inner is Map ? Map<String, dynamic>.from(inner) : json;
+
+    final rawNetworkId = obj['networkId'];
+    final networkId = rawNetworkId == null
+        ? ''
+        : (rawNetworkId is String ? rawNetworkId : rawNetworkId.toString());
+
+    final rawMeta = obj['metadata'];
+    final metadata = rawMeta is Map
+        ? TransactionMetadata.fromJson(Map<String, dynamic>.from(rawMeta))
+        : null;
 
     return TransactionReference(
-      namespace: json['namespace'] as String?,
+      namespace: obj['namespace'] as String?,
       networkId: networkId,
-      reference: json['reference'] as String,
-      metadata: json['metadata'] != null
-          ? TransactionMetadata.fromJson(json['metadata'] as Map<String, dynamic>)
-          : null,
+      reference: (obj['reference'] as String?) ?? '',
+      metadata: metadata,
     );
   }
 
@@ -1342,9 +1391,14 @@ class TransactionReference {
         'reference': reference,
         if (metadata != null) 'metadata': metadata!.toJson(),
       };
+
+  @override
+  String toString() =>
+      'TransactionReference(networkId: $networkId, reference: $reference, '
+      'namespace: $namespace, metadata: $metadata)';
 }
 
-/// Transaction reference codec — JSON wire format
+/// Transaction reference codec — JSON wire format (XIP-21).
 class TransactionReferenceCodec extends XMTPCodec {
   @override
   String get authorityId => 'xmtp.org';
@@ -1363,6 +1417,7 @@ class TransactionReferenceCodec extends XMTPCodec {
     if (content is! TransactionReference) {
       throw const FormatException('Content must be TransactionReference');
     }
+    // Canonical flat JSON — interoperable with libxmtp / xmtp-js / Base.
     final jsonBytes = utf8.encode(jsonEncode(content.toJson()));
     return {
       'content': Uint8List.fromList(jsonBytes),
@@ -1372,20 +1427,223 @@ class TransactionReferenceCodec extends XMTPCodec {
 
   @override
   Future<TransactionReference> decode(EncodedContent encodedContent) async {
-    try {
-      final jsonString = utf8.decode(encodedContent.content);
-      final Map<String, dynamic> data = jsonDecode(jsonString);
-      return TransactionReference.fromJson(data);
-    } catch (e) {
-      throw FormatException('Failed to decode TransactionReference: $e');
+    final jsonString = utf8.decode(encodedContent.content);
+    final decoded = jsonDecode(jsonString);
+    if (decoded is! Map) {
+      throw FormatException(
+          'TransactionReference: expected a JSON object, got ${decoded.runtimeType}');
     }
+    // fromJson tolerates both the canonical flat object and a wrapped envelope.
+    return TransactionReference.fromJson(Map<String, dynamic>.from(decoded));
   }
 
   @override
   String? getFallback(dynamic content) {
     if (content is TransactionReference) {
-      return '[Crypto transaction] Use a blockchain explorer to learn more '
-          'using the transaction hash: ${content.reference}';
+      if (content.reference.isNotEmpty) {
+        return '[Crypto transaction] Use a blockchain explorer to learn more '
+            'using the transaction hash: ${content.reference}';
+      }
+      return 'Crypto transaction';
+    }
+    return null;
+  }
+
+  @override
+  bool shouldPush(dynamic content) => true;
+}
+
+// ============================================================================
+// Wallet Send Calls — JSON wire format (xmtp.org/walletSendCalls/1.0)
+// ----------------------------------------------------------------------------
+// XIP-59 / EIP-5792 `wallet_sendCalls`. Canonical reference: libxmtp
+//   crates/xmtp_content_types/src/wallet_send_calls.rs
+// Canonical wire shape is a FLAT JSON object:
+//   { version, chainId, from, calls:[ {to?, data?, value?, gas?, metadata?} ],
+//     capabilities? }
+// where call metadata = { description, transactionType, ...extra } (the extra
+// keys are flattened as siblings via serde `#[serde(flatten)]`).
+//
+// This is the actionable "invoice": the recipient reviews the calls, signs, and
+// broadcasts, then replies with a TransactionReference receipt. ENCODE is
+// canonical-flat; DECODE is lenient (optional fields, flattened extras).
+// ============================================================================
+
+/// Per-call metadata for a wallet send calls request.
+class WalletCallMetadata {
+  final String? description;
+  final String? transactionType;
+
+  /// Extra keys flattened alongside description/transactionType on the wire.
+  final Map<String, dynamic> extra;
+
+  WalletCallMetadata({
+    this.description,
+    this.transactionType,
+    this.extra = const {},
+  });
+
+  static const _known = {'description', 'transactionType'};
+
+  factory WalletCallMetadata.fromJson(Map<String, dynamic> json) {
+    return WalletCallMetadata(
+      description: json['description'] as String?,
+      transactionType: json['transactionType'] as String?,
+      extra: {
+        for (final e in json.entries)
+          if (!_known.contains(e.key)) e.key: e.value,
+      },
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        if (description != null) 'description': description,
+        if (transactionType != null) 'transactionType': transactionType,
+        ...extra,
+      };
+
+  @override
+  String toString() => 'WalletCallMetadata(${toJson()})';
+}
+
+/// A single call within a wallet send calls request (EIP-5792 shape).
+class WalletCall {
+  /// Target address (hex).
+  final String? to;
+
+  /// Calldata (hex).
+  final String? data;
+
+  /// Value in wei (hex).
+  final String? value;
+
+  /// Gas limit (hex).
+  final String? gas;
+  final WalletCallMetadata? metadata;
+
+  WalletCall({this.to, this.data, this.value, this.gas, this.metadata});
+
+  factory WalletCall.fromJson(Map<String, dynamic> json) {
+    final rawMeta = json['metadata'];
+    return WalletCall(
+      to: json['to'] as String?,
+      data: json['data'] as String?,
+      value: json['value'] as String?,
+      gas: json['gas'] as String?,
+      metadata: rawMeta is Map
+          ? WalletCallMetadata.fromJson(Map<String, dynamic>.from(rawMeta))
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        if (to != null) 'to': to,
+        if (data != null) 'data': data,
+        if (value != null) 'value': value,
+        if (gas != null) 'gas': gas,
+        if (metadata != null) 'metadata': metadata!.toJson(),
+      };
+
+  @override
+  String toString() => 'WalletCall(${toJson()})';
+}
+
+/// A wallet send calls request (an invoice / transaction request).
+class WalletSendCalls {
+  final String version;
+
+  /// Chain id in hex (e.g. "0x2105" for Base).
+  final String chainId;
+
+  /// The address expected to send the calls (hex).
+  final String from;
+  final List<WalletCall> calls;
+  final Map<String, dynamic>? capabilities;
+
+  WalletSendCalls({
+    required this.version,
+    required this.chainId,
+    required this.from,
+    required this.calls,
+    this.capabilities,
+  });
+
+  factory WalletSendCalls.fromJson(Map<String, dynamic> json) {
+    final rawCalls = json['calls'];
+    final calls = <WalletCall>[];
+    if (rawCalls is List) {
+      for (final c in rawCalls) {
+        if (c is Map) {
+          calls.add(WalletCall.fromJson(Map<String, dynamic>.from(c)));
+        }
+      }
+    }
+    final rawCaps = json['capabilities'];
+    return WalletSendCalls(
+      version: (json['version'] as String?) ?? '',
+      chainId: (json['chainId'] as String?) ?? '',
+      from: (json['from'] as String?) ?? '',
+      calls: calls,
+      capabilities:
+          rawCaps is Map ? Map<String, dynamic>.from(rawCaps) : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'version': version,
+        'chainId': chainId,
+        'from': from,
+        'calls': calls.map((c) => c.toJson()).toList(),
+        if (capabilities != null) 'capabilities': capabilities,
+      };
+
+  @override
+  String toString() =>
+      'WalletSendCalls(chainId: $chainId, from: $from, calls: $calls, '
+      'capabilities: $capabilities)';
+}
+
+/// Wallet send calls codec — JSON wire format (XIP-59 / EIP-5792).
+class WalletSendCallsCodec extends XMTPCodec {
+  @override
+  String get authorityId => 'xmtp.org';
+
+  @override
+  String get typeId => 'walletSendCalls';
+
+  @override
+  int get versionMajor => 1;
+
+  @override
+  int get versionMinor => 0;
+
+  @override
+  Future<Map<String, dynamic>> encode(dynamic content) async {
+    if (content is! WalletSendCalls) {
+      throw const FormatException('Content must be WalletSendCalls');
+    }
+    final jsonBytes = utf8.encode(jsonEncode(content.toJson()));
+    return {
+      'content': Uint8List.fromList(jsonBytes),
+      'parameters': <String, dynamic>{},
+    };
+  }
+
+  @override
+  Future<WalletSendCalls> decode(EncodedContent encodedContent) async {
+    final jsonString = utf8.decode(encodedContent.content);
+    final decoded = jsonDecode(jsonString);
+    if (decoded is! Map) {
+      throw FormatException(
+          'WalletSendCalls: expected a JSON object, got ${decoded.runtimeType}');
+    }
+    return WalletSendCalls.fromJson(Map<String, dynamic>.from(decoded));
+  }
+
+  @override
+  String? getFallback(dynamic content) {
+    if (content is WalletSendCalls) {
+      return '[Transaction request generated]: ${jsonEncode(content.toJson())}';
     }
     return null;
   }
