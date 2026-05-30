@@ -102,14 +102,16 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
   }
 
   @override
-  Future<String?> sendMessageByInboxId(String recipientInboxId,
+  Future<Map<String, dynamic>?> sendMessageByInboxId(String recipientInboxId,
       dynamic message, String authorityId, String typeId,
       int versionMajor) async {
     await _ensureInitialized();
     final contentBytes = _extractContentBytes(message, authorityId, typeId,
         versionMajor);
-    return rust_messaging.sendMessageByInboxId(
+    final messageId = await rust_messaging.sendMessageByInboxId(
         inboxId: recipientInboxId, contentBytes: contentBytes);
+    // Rust bridge returns the message id only; topic-healing is iOS-driven.
+    return {'messageId': messageId, 'topic': null};
   }
 
   @override

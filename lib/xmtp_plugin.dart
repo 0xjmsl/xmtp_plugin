@@ -74,7 +74,10 @@ class XmtpPlugin {
     );
   }
 
-  Future<String?> sendMessageByInboxId(String recipientInboxId, dynamic content, String authorityId, String typeId) async {
+  /// Sends a DM by recipient inbox id and returns `{messageId, topic}` where
+  /// `topic` is the live DM the message was sent to (find-or-create). Callers
+  /// use `topic` to heal a stale cached conversation topic.
+  Future<Map<String, dynamic>?> sendMessageByInboxId(String recipientInboxId, dynamic content, String authorityId, String typeId) async {
     final codec = _codecRegistry.getCodec(authorityId, typeId);
     if (codec == null) {
       throw Exception('No codec found for $authorityId/$typeId');

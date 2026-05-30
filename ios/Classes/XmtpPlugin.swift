@@ -600,9 +600,16 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                 )
                 
                 let messageId = try await conversation.send(encodedContent: encodedContent)
-                
+                // Return the live DM topic alongside the message id so the Dart
+                // layer can heal a stale cached topic (send is find-or-create,
+                // so `conversation` is always the canonical live DM).
+                let dmMap: [String: Any] = [
+                    "messageId": messageId,
+                    "topic": conversation.topic,
+                ]
+
                 DispatchQueue.main.async {
-                    result(messageId)
+                    result(dmMap)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -611,7 +618,7 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             }
         }
     }
-    
+
     private func sendGroupMessage(topic: String, message: [String: Any], contentType: ContentType, result: @escaping FlutterResult) {
         guard let client = client else {
             result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))

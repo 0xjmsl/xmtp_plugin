@@ -66,19 +66,27 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
   }
 
   @override
-  Future<String?> sendMessageByInboxId(String recipientInboxId, dynamic message, String authorityId, String typeId, int versionMajor) async {
+  Future<Map<String, dynamic>?> sendMessageByInboxId(String recipientInboxId, dynamic message, String authorityId, String typeId, int versionMajor) async {
     if (message is! Map<String, dynamic>) {
       throw const FormatException('Message must be a Map with content and parameters');
     }
 
-    final result = await methodChannel.invokeMethod<String>('sendMessageByInboxId', {
+    final result = await methodChannel.invokeMethod('sendMessageByInboxId', {
       'recipientInboxId': recipientInboxId,
       'message': message,
       'authorityId': authorityId,
       'typeId': typeId,
       'versionMajor': versionMajor,
     });
-    return result;
+    // New native impl returns {messageId, topic}; tolerate the legacy
+    // String (messageId only) return shape for forward/backward safety.
+    if (result is Map) {
+      return Map<String, dynamic>.from(result);
+    }
+    if (result is String) {
+      return {'messageId': result, 'topic': null};
+    }
+    return null;
   }
 
   @override

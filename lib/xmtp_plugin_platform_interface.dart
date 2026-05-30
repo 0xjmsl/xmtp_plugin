@@ -49,7 +49,10 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('sendMessage() has not been implemented.');
   }
 
-  Future<String?> sendMessageByInboxId(String recipientInboxId, dynamic message, String authorityId, String typeId, int versionMajor) {
+  /// Returns a map with `messageId` and the live DM `topic` (the conversation
+  /// that was actually sent to — send is find-or-create, so this is always the
+  /// canonical DM topic). `topic` may be null on platforms that don't surface it.
+  Future<Map<String, dynamic>?> sendMessageByInboxId(String recipientInboxId, dynamic message, String authorityId, String typeId, int versionMajor) {
     throw UnimplementedError('sendMessageByInboxId() has not been implemented.');
   }
 

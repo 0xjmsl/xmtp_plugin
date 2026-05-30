@@ -142,7 +142,7 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   @override
-  Future<String?> sendMessageByInboxId(
+  Future<Map<String, dynamic>?> sendMessageByInboxId(
     String recipientInboxId,
     dynamic message,
     String authorityId,
@@ -162,7 +162,8 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
         _clientManager.sendMessageByInboxId(params),
       );
 
-      return (result as JSString?)?.toDart;
+      // Web JS bridge returns the message id only; topic-healing is iOS-driven.
+      return {'messageId': (result as JSString?)?.toDart, 'topic': null};
     } catch (e) {
       throw Exception('Failed to send message by inbox ID: $e');
     }
