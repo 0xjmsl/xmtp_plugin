@@ -12,6 +12,7 @@ import 'src/rust/api/consent.dart' as rust_consent;
 import 'src/rust/api/inbox.dart' as rust_inbox;
 import 'src/rust/api/push.dart' as rust_push;
 import 'src/rust/api/signing.dart' as rust_signing;
+import 'src/rust/api/archive.dart' as rust_archive;
 import 'src/rust/frb_generated.dart';
 
 /// Windows implementation of the XMTP Flutter plugin.
@@ -84,6 +85,56 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
   Future<String?> getClientInboxId() async {
     await _ensureInitialized();
     return rust_client.getClientInboxId();
+  }
+
+  // ============================================================================
+  // ARCHIVE BACKUP (native libxmtp encrypted archive export/import into MLS)
+  // The 32-byte `key` is derived in the Dart facade (Argon2id); here we only
+  // pass it through to the Rust archive primitives.
+  // ============================================================================
+
+  static rust_archive.BackupElement _archiveElement(String s) =>
+      s == 'consent'
+          ? rust_archive.BackupElement.consent
+          : rust_archive.BackupElement.messages;
+
+  @override
+  Future<void> createArchive(String path, Uint8List key,
+      {List<String> elements = const [],
+      int? startNs,
+      int? endNs,
+      bool excludeDisappearing = false}) async {
+    await _ensureInitialized();
+    return rust_archive.createArchive(
+      path: path,
+      key: key,
+      elements: elements.map(_archiveElement).toList(),
+      startNs: startNs,
+      endNs: endNs,
+      excludeDisappearingMessages: excludeDisappearing,
+    );
+  }
+
+  @override
+  Future<void> importArchive(String path, Uint8List key) async {
+    await _ensureInitialized();
+    return rust_archive.importArchive(path: path, key: key);
+  }
+
+  @override
+  Future<Map<String, dynamic>> archiveMetadata(String path, Uint8List key) async {
+    await _ensureInitialized();
+    final m = await rust_archive.archiveMetadata(path: path, key: key);
+    return {
+      'backupVersion': m.backupVersion,
+      'elements': m.elements
+          .map((e) =>
+              e == rust_archive.BackupElement.consent ? 'consent' : 'messages')
+          .toList(),
+      'exportedAtNs': m.exportedAtNs,
+      'startNs': m.startNs,
+      'endNs': m.endNs,
+    };
   }
 
   // ============================================================================

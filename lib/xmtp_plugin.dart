@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
+import 'package:pointycastle/key_derivators/api.dart';
+import 'package:pointycastle/key_derivators/argon2.dart';
 import 'package:xmtp_plugin/codecs.dart';
 import 'xmtp_plugin_platform_interface.dart';
 
@@ -56,6 +59,63 @@ class XmtpPlugin {
   Future<String> getClientInboxId() async {
     final String? clientInboxId = await _platform.getClientInboxId();
     return clientInboxId ?? '';
+  }
+
+  // ============================================================================
+  // ARCHIVE BACKUP (native libxmtp encrypted archives — export/import into MLS)
+  //
+  // The encryption key is derived HERE, once, from the user password salted by
+  // the inbox ID (Argon2id), then passed to the platform layer. One KDF for
+  // Windows/Android/iOS => archives are portable across every platform/device
+  // of the same inbox. The password never crosses the platform boundary.
+  // ============================================================================
+
+  /// Export an encrypted archive of the active inbox's messages/consent to
+  /// [path] (a `.xmtpBak` file). [password] derives the key; an empty
+  /// [elements] archives both Messages + Consent (the upstream default).
+  Future<void> exportArchive(
+    String path,
+    String password, {
+    List<BackupElement> elements = const [],
+    int? startNs,
+    int? endNs,
+    bool excludeDisappearing = false,
+  }) async {
+    final key = await _deriveArchiveKey(password);
+    return _platform.createArchive(
+      path,
+      key,
+      elements: elements.map((e) => e.name).toList(),
+      startNs: startNs,
+      endNs: endNs,
+      excludeDisappearing: excludeDisappearing,
+    );
+  }
+
+  /// Decrypt + import an archive at [path] into the active inbox's MLS store
+  /// (additive). A wrong [password] (or an archive from a different inbox)
+  /// simply fails to decrypt — nothing is imported.
+  Future<void> importArchive(String path, String password) async {
+    final key = await _deriveArchiveKey(password);
+    return _platform.importArchive(path, key);
+  }
+
+  /// Read an archive's header (scope/counts/time range) without importing.
+  /// Also verifies the password (throws on a wrong key).
+  Future<ArchiveMetadata> archiveMetadata(String path, String password) async {
+    final key = await _deriveArchiveKey(password);
+    final m = await _platform.archiveMetadata(path, key);
+    return ArchiveMetadata.fromMap(m);
+  }
+
+  /// Derive the 32-byte archive key from [password] salted by the active
+  /// inbox ID. Throws if no client/session is active (no inbox ID to salt with).
+  Future<Uint8List> _deriveArchiveKey(String password) async {
+    final inboxId = await getClientInboxId();
+    if (inboxId.isEmpty) {
+      throw StateError('No active XMTP session — cannot derive the archive key.');
+    }
+    return deriveArchiveKey(password, inboxId);
   }
 
   Future<String?> sendMessage(String recipientAddress, dynamic content, String authorityId, String typeId) async {
@@ -546,6 +606,67 @@ class XmtpPlugin {
     final result = await _platform.processWelcome(encryptedBytes);
     return result.map((e) => Map<String, dynamic>.from(e)).toList();
   }
+}
+
+// ============================================================================
+// ARCHIVE BACKUP TYPES + KEY DERIVATION
+// ============================================================================
+
+/// Which application data an archive carries. Empty list at the call site =>
+/// both (the upstream default). Serialized to its [name] across the platform
+/// boundary ('messages' / 'consent').
+enum BackupElement { messages, consent }
+
+/// Archive header read by [XmtpPlugin.archiveMetadata] without importing.
+class ArchiveMetadata {
+  final int backupVersion;
+  final List<BackupElement> elements;
+  final int exportedAtNs;
+  final int? startNs;
+  final int? endNs;
+
+  const ArchiveMetadata({
+    required this.backupVersion,
+    required this.elements,
+    required this.exportedAtNs,
+    this.startNs,
+    this.endNs,
+  });
+
+  factory ArchiveMetadata.fromMap(Map<String, dynamic> m) => ArchiveMetadata(
+        backupVersion: (m['backupVersion'] as num).toInt(),
+        elements: ((m['elements'] as List?) ?? const [])
+            .map((e) =>
+                e == 'consent' ? BackupElement.consent : BackupElement.messages)
+            .toList(),
+        exportedAtNs: (m['exportedAtNs'] as num).toInt(),
+        startNs: (m['startNs'] as num?)?.toInt(),
+        endNs: (m['endNs'] as num?)?.toInt(),
+      );
+}
+
+/// Derive the 32-byte archive encryption key from a user [password] salted by
+/// the [inboxId]. **Pinned parameters — NEVER change them, or every existing
+/// backup stops decrypting:** Argon2id, version 0x13, memory 19456 KiB, 2
+/// iterations, 1 lane, 32-byte output, salt = the inbox ID as UTF-8.
+///
+/// Runs in pure Dart (pointycastle) so Windows/Android/iOS produce a byte-
+/// identical key — an archive made on one platform restores on any other of
+/// the same inbox. The native layer only ever receives this derived key.
+Uint8List deriveArchiveKey(String password, String inboxId) {
+  final params = Argon2Parameters(
+    Argon2Parameters.ARGON2_id,
+    Uint8List.fromList(utf8.encode(inboxId)),
+    desiredKeyLength: 32,
+    iterations: 2,
+    memory: 19456,
+    lanes: 1,
+    version: Argon2Parameters.ARGON2_VERSION_13,
+  );
+  final generator = Argon2BytesGenerator()..init(params);
+  final out = Uint8List(32);
+  generator.deriveKey(Uint8List.fromList(utf8.encode(password)), 0, out, 0);
+  return out;
 }
 
 // ============================================================================

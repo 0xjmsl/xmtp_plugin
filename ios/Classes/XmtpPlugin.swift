@@ -343,6 +343,37 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             }
             syncConversation(topic: topic, result: result)
 
+        case "createArchive":
+            guard let args = call.arguments as? [String: Any],
+                  let path = args["path"] as? String,
+                  let key = args["key"] as? FlutterStandardTypedData else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "path and key are required", details: nil))
+                return
+            }
+            let elementStrings = args["elements"] as? [String] ?? []
+            let startNs = (args["startNs"] as? NSNumber)?.int64Value
+            let endNs = (args["endNs"] as? NSNumber)?.int64Value
+            let excludeDisappearing = args["excludeDisappearing"] as? Bool ?? false
+            createArchive(path: path, key: key.data, elementStrings: elementStrings, startNs: startNs, endNs: endNs, excludeDisappearing: excludeDisappearing, result: result)
+
+        case "importArchive":
+            guard let args = call.arguments as? [String: Any],
+                  let path = args["path"] as? String,
+                  let key = args["key"] as? FlutterStandardTypedData else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "path and key are required", details: nil))
+                return
+            }
+            importArchive(path: path, key: key.data, result: result)
+
+        case "archiveMetadata":
+            guard let args = call.arguments as? [String: Any],
+                  let path = args["path"] as? String,
+                  let key = args["key"] as? FlutterStandardTypedData else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "path and key are required", details: nil))
+                return
+            }
+            archiveMetadata(path: path, key: key.data, result: result)
+
         // ============================================================================
         // INBOX MANAGEMENT METHODS
         // ============================================================================
@@ -669,6 +700,82 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
     }
     
     // MARK: - Sync Methods
+    // MARK: - Archive Backup
+    // Native libxmtp encrypted archive export/import into the MLS store. The
+    // 32-byte `key` is derived in the Dart facade (Argon2id); here we only pass
+    // it to the XMTPiOS Client archive API.
+
+    private func archiveElements(_ strings: [String]) -> [ArchiveElement] {
+        if strings.isEmpty { return [.messages, .consent] }
+        return strings.compactMap { s in
+            switch s.lowercased() {
+            case "messages": return .messages
+            case "consent": return .consent
+            default: return nil
+            }
+        }
+    }
+
+    private func createArchive(path: String, key: Data, elementStrings: [String], startNs: Int64?, endNs: Int64?, excludeDisappearing: Bool, result: @escaping FlutterResult) {
+        guard let client = client else {
+            result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))
+            return
+        }
+        let opts = ArchiveOptions(startNs: startNs, endNs: endNs, archiveElements: archiveElements(elementStrings), excludeDisappearingMessages: excludeDisappearing)
+        Task {
+            do {
+                try await client.createArchive(path: path, encryptionKey: key, opts: opts)
+                DispatchQueue.main.async { result(nil) }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "CREATE_ARCHIVE_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    private func importArchive(path: String, key: Data, result: @escaping FlutterResult) {
+        guard let client = client else {
+            result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))
+            return
+        }
+        Task {
+            do {
+                try await client.importArchive(path: path, encryptionKey: key)
+                DispatchQueue.main.async { result(nil) }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "IMPORT_ARCHIVE_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    private func archiveMetadata(path: String, key: Data, result: @escaping FlutterResult) {
+        guard let client = client else {
+            result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))
+            return
+        }
+        Task {
+            do {
+                let md = try await client.archiveMetadata(path: path, encryptionKey: key)
+                let elements = md.elements.map { $0 == .consent ? "consent" : "messages" }
+                var map: [String: Any] = [
+                    "backupVersion": Int(md.archiveVersion),
+                    "elements": elements,
+                    "exportedAtNs": md.exportedAtNs,
+                ]
+                if let s = md.startNs { map["startNs"] = s }
+                if let e = md.endNs { map["endNs"] = e }
+                DispatchQueue.main.async { result(map) }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "ARCHIVE_METADATA_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
     private func syncAll(consentStates: [String]?, result: @escaping FlutterResult) {
         guard let client = client else {
             result(FlutterError(code: "CLIENT_NOT_INITIALIZED", message: "XMTP client has not been initialized", details: nil))

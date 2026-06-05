@@ -49,6 +49,40 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
     return inboxId;
   }
 
+  // ============================================================================
+  // ARCHIVE BACKUP (Android/iOS → native xmtp SDK createArchive/importArchive)
+  // ============================================================================
+
+  @override
+  Future<void> createArchive(String path, Uint8List key,
+      {List<String> elements = const [], int? startNs, int? endNs, bool excludeDisappearing = false}) async {
+    await methodChannel.invokeMethod('createArchive', {
+      'path': path,
+      'key': key,
+      'elements': elements,
+      'startNs': startNs,
+      'endNs': endNs,
+      'excludeDisappearing': excludeDisappearing,
+    });
+  }
+
+  @override
+  Future<void> importArchive(String path, Uint8List key) async {
+    await methodChannel.invokeMethod('importArchive', {
+      'path': path,
+      'key': key,
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>> archiveMetadata(String path, Uint8List key) async {
+    final result = await methodChannel.invokeMethod('archiveMetadata', {
+      'path': path,
+      'key': key,
+    });
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   @override
   Future<String?> sendMessage(String recipientAddress, dynamic message, String authorityId, String typeId, int versionMajor) async {
     if (message is! Map<String, dynamic>) {

@@ -20,6 +20,8 @@ import org.xmtp.android.library.ConsentRecord
 import org.xmtp.android.library.libxmtp.PermissionLevel
 import org.xmtp.android.library.libxmtp.PublicIdentity
 import org.xmtp.android.library.libxmtp.IdentityKind
+import org.xmtp.android.library.libxmtp.ArchiveOptions
+import org.xmtp.android.library.libxmtp.ArchiveElement
 import org.xmtp.proto.message.api.v1.MessageApiOuterClass.Envelope
 import org.xmtp.proto.message.contents.Content.ContentTypeId
 import org.xmtp.android.library.codecs.Attachment
@@ -170,6 +172,48 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
       "syncAll" -> {
         val consentStates = call.argument<List<String>>("consentStates")
         syncAll(consentStates, result)
+      }
+      "createArchive" -> {
+        val path = call.argument<String>("path")
+        val key = call.argument<ByteArray>("key")
+        if (path == null || key == null) {
+          result.error("INVALID_ARGUMENTS", "path and key are required", null)
+          return
+        }
+        val elementStrings = call.argument<List<String>>("elements") ?: emptyList()
+        val startNs = call.argument<Number>("startNs")?.toLong()
+        val endNs = call.argument<Number>("endNs")?.toLong()
+        val excludeDisappearing = call.argument<Boolean>("excludeDisappearing") ?: false
+        val archiveElements = if (elementStrings.isEmpty()) {
+          listOf(ArchiveElement.MESSAGES, ArchiveElement.CONSENT)
+        } else {
+          elementStrings.mapNotNull {
+            when (it.lowercase()) {
+              "messages" -> ArchiveElement.MESSAGES
+              "consent" -> ArchiveElement.CONSENT
+              else -> null
+            }
+          }
+        }
+        createArchive(path, key, ArchiveOptions(startNs, endNs, archiveElements, excludeDisappearing), result)
+      }
+      "importArchive" -> {
+        val path = call.argument<String>("path")
+        val key = call.argument<ByteArray>("key")
+        if (path == null || key == null) {
+          result.error("INVALID_ARGUMENTS", "path and key are required", null)
+          return
+        }
+        importArchive(path, key, result)
+      }
+      "archiveMetadata" -> {
+        val path = call.argument<String>("path")
+        val key = call.argument<ByteArray>("key")
+        if (path == null || key == null) {
+          result.error("INVALID_ARGUMENTS", "path and key are required", null)
+          return
+        }
+        archiveMetadata(path, key, result)
       }
       "syncConversation" -> {
         val topic = call.argument<String>("topic")
@@ -1045,6 +1089,54 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
         result.success(null)
       } catch (e: Exception) {
         result.error("SYNC_CONVERSATION_FAILED", e.message, null)
+      }
+    }
+  }
+
+  // ============================================================================
+  // ARCHIVE BACKUP (native libxmtp encrypted archive export/import into MLS).
+  // The 32-byte `key` is derived in the Dart facade (Argon2id); we only pass it
+  // to the xmtp-android Client archive API.
+  // ============================================================================
+
+  private fun createArchive(path: String, key: ByteArray, opts: ArchiveOptions, result: Result) {
+    scope.launch {
+      try {
+        val c = client ?: throw IllegalStateException("XMTP client not initialized")
+        c.createArchive(path, key, opts)
+        result.success(null)
+      } catch (e: Exception) {
+        result.error("CREATE_ARCHIVE_FAILED", e.message, null)
+      }
+    }
+  }
+
+  private fun importArchive(path: String, key: ByteArray, result: Result) {
+    scope.launch {
+      try {
+        val c = client ?: throw IllegalStateException("XMTP client not initialized")
+        c.importArchive(path, key)
+        result.success(null)
+      } catch (e: Exception) {
+        result.error("IMPORT_ARCHIVE_FAILED", e.message, null)
+      }
+    }
+  }
+
+  private fun archiveMetadata(path: String, key: ByteArray, result: Result) {
+    scope.launch {
+      try {
+        val c = client ?: throw IllegalStateException("XMTP client not initialized")
+        val md = c.archiveMetadata(path, key)
+        result.success(mapOf(
+          "backupVersion" to md.archiveVersion.toInt(),
+          "elements" to md.elements.map { if (it == ArchiveElement.CONSENT) "consent" else "messages" },
+          "exportedAtNs" to md.exportedAtNs,
+          "startNs" to md.startNs,
+          "endNs" to md.endNs
+        ))
+      } catch (e: Exception) {
+        result.error("ARCHIVE_METADATA_FAILED", e.message, null)
       }
     }
   }

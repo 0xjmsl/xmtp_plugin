@@ -45,6 +45,25 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('getClientInboxId() has not been implemented.');
   }
 
+  // ============================================================================
+  // ARCHIVE BACKUP (native libxmtp encrypted archive export/import)
+  // `key` is the 32-byte archive key, derived in the facade (Argon2id). The
+  // platform layer never sees the password.
+  // ============================================================================
+
+  Future<void> createArchive(String path, Uint8List key,
+      {List<String> elements = const [], int? startNs, int? endNs, bool excludeDisappearing = false}) {
+    throw UnimplementedError('createArchive() has not been implemented.');
+  }
+
+  Future<void> importArchive(String path, Uint8List key) {
+    throw UnimplementedError('importArchive() has not been implemented.');
+  }
+
+  Future<Map<String, dynamic>> archiveMetadata(String path, Uint8List key) {
+    throw UnimplementedError('archiveMetadata() has not been implemented.');
+  }
+
   Future<String?> sendMessage(String recipientAddress, dynamic message, String authorityId, String typeId, int versionMajor) {
     throw UnimplementedError('sendMessage() has not been implemented.');
   }
