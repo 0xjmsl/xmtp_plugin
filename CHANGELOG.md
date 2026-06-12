@@ -1,4 +1,38 @@
-## 1.0.7
+## 1.1.0
+
+### BREAKING: `sendMessageByInboxId` now returns `{messageId, topic}`
+
+The return type changed from `Future<String?>` (the message id) to `Future<Map<String, dynamic>?>` with two keys: `messageId` and `topic`. `topic` is the live DM conversation the message was actually sent to — the send path is find-or-create, so this is always the canonical DM topic. Callers use it to heal a stale cached conversation topic (libxmtp can stitch duplicate DMs, after which a previously-cached topic no longer matches the surviving conversation).
+
+Implemented on all four platforms. iOS returns the topic natively from the send; Android, Windows, and Web resolve it via the same `findOrCreateDM` lookup the send used (idempotent and local after the first call). The lookup is best-effort: on failure `topic` is `null` and the send still succeeds — callers must treat `topic` as optional.
+
+Migration: `final id = await sendMessageByInboxId(...)` becomes `final result = await sendMessageByInboxId(...); final id = result?['messageId'] as String?;`.
+
+### Encrypted archive backups: `exportArchive` / `importArchive` / `archiveMetadata`
+
+Native libxmtp encrypted archives (the `xmtp_archive` export/import primitives over the MLS store), surfaced as three new methods on `XmtpPlugin`:
+
+* **`exportArchive(path, password, {elements, startNs, endNs, excludeDisappearing})`** — write an encrypted archive of the active inbox's data to `path` (e.g. a `.xmtpBak` file). `elements` selects `BackupElement.messages` and/or `BackupElement.consent`; an empty list archives both (the upstream default). Optional `startNs`/`endNs` bound the time range.
+
+* **`importArchive(path, password)`** — decrypt and import an archive into the active inbox's MLS store. The import is additive. A wrong password — or an archive made by a different inbox — fails to decrypt before anything is written.
+
+* **`archiveMetadata(path, password)`** — read the archive header (`ArchiveMetadata`: backup version, elements, exported-at, time range) without importing. Doubles as a password check, since a wrong key fails the open.
+
+**Key derivation happens once, in Dart, and is pinned.** The 32-byte encryption key is `Argon2id(password, salt = inboxId)` via pointycastle (version 0x13, 19456 KiB memory, 2 iterations, 1 lane). Because the KDF runs in pure Dart, Android/iOS/Windows produce a byte-identical key — an archive made on one platform restores on any other device of the same inbox. The password never crosses the platform boundary; the native layers only ever see the derived key. These parameters must never change or existing backups stop decrypting. The KDF is also exported as a public `deriveArchiveKey(password, inboxId)` for consumers that need the raw key.
+
+Platform coverage: Android, iOS, and Windows (new Rust bridge module `rust/src/api/archive.rs`, mirroring `bindings_ffi/src/mls.rs::{create_archive, import_archive, archive_metadata}` @ libxmtp v1.9.0). Web throws `UnimplementedError`.
+
+### New codec: Wallet Send Calls (`xmtp.org/walletSendCalls:1.0`, XIP-59 / EIP-5792)
+
+`WalletSendCallsCodec` plus the `WalletSendCalls` / `WalletCall` / `WalletCallMetadata` content classes, registered in the default codec registry. This is the actionable "invoice" side of in-chat payments: the sender proposes EIP-5792 `wallet_sendCalls` (version, chainId, from, calls with to/data/value/gas + per-call metadata, optional capabilities); the recipient reviews, signs, and broadcasts, then replies with a `TransactionReference` receipt.
+
+Encode emits the canonical flat JSON shape from libxmtp `crates/xmtp_content_types/src/wallet_send_calls.rs`, so sends interoperate with libxmtp / xmtp-js / Base. Decode is lenient: every field optional, and extra metadata keys (serde-flattened siblings on the wire) are preserved in `WalletCallMetadata.extra`.
+
+### `TransactionReference` codec hardened for cross-client receive (XIP-21)
+
+Real-world senders (e.g. Base payment agents) have been observed emitting the payload **wrapped** under a `"transactionReference"` key and with **partial** metadata, where the canonical libxmtp shape is a flat object with all six metadata fields. Decode now follows Postel's law: unwraps the envelope if present, accepts `networkId` as string-or-number, treats every metadata field as optional, and preserves unknown metadata keys in `TransactionMetadata.extra` instead of dropping them. Encode is unchanged — canonical flat, only set fields emitted.
+
+Source-breaking detail for consumers: `TransactionMetadata`'s fields are now nullable (previously all `required`). Covered by new unit tests in `test/transaction_codecs_test.dart`.
 
 ### Fix: `staticDeleteLocalDatabase` now honors the custom `dbDirectory`
 
