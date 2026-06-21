@@ -49,6 +49,11 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
   private lateinit var channel : MethodChannel
   private var client: Client? = null
   private val scope = CoroutineScope(Dispatchers.IO)
+  // Holds the streamAllMessages collect-loop so it can be cancelled explicitly
+  // (stopMessageStream). Without this the coroutine is fire-and-forget and the
+  // Dart-side subscription cancel never reaches the native loop — see
+  // stopMessageStream() / threads/xmtp_backup_restore stream-pause fix.
+  private var messageStreamJob: Job? = null
   private lateinit var context: Context  // Add this
 
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -128,6 +133,11 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
       }
       "subscribeToAllMessages" -> {
         subscribeToAllMessages(result)
+      }
+      "stopMessageStream" -> {
+        messageStreamJob?.cancel()
+        messageStreamJob = null
+        result.success(null)
       }
       "getConversationConsentState" -> {
         val topic = call.argument<String>("topic")
@@ -398,7 +408,9 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
             }
       "getMessagesAfterDate" -> {
         val peerAddress = call.argument<String>("peerAddress")
-        val fromDate = call.argument<Long>("fromDate")
+        // Flutter delivers Dart ints < 2^31 as Java Integer, larger as Long.
+        // A bare `as Long` cast crashes on small values (e.g. epoch 0). Coerce via Number.
+        val fromDate = (call.argument<Number>("fromDate"))?.toLong()
         if (peerAddress != null && fromDate != null) {
           getMessagesAfterDate(peerAddress, fromDate, result)
         } else {
@@ -407,7 +419,9 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
       }
       "getMessagesAfterDateByTopic" -> {
         val topic = call.argument<String>("topic")
-        val fromDate = call.argument<Long>("fromDate")
+        // Flutter delivers Dart ints < 2^31 as Java Integer, larger as Long.
+        // A bare `as Long` cast crashes on small values (e.g. epoch 0). Coerce via Number.
+        val fromDate = (call.argument<Number>("fromDate"))?.toLong()
         if (topic != null && fromDate != null) {
           getMessagesAfterDateByTopic(topic, fromDate, result)
         } else {
@@ -825,7 +839,11 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
   }
 
   private fun subscribeToAllMessages(result: Result) {
-      scope.launch {
+      // Cancel any prior loop before starting a new one — a leftover job would
+      // double-deliver every message. Hold the job so stopMessageStream() can
+      // cancel it (the Dart subscription cancel does NOT reach this coroutine).
+      messageStreamJob?.cancel()
+      messageStreamJob = scope.launch {
           try {
               println("Android Subscribing to all messages")
               client?.conversations?.streamAllMessages()?.collect { message ->
@@ -851,6 +869,13 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
                   }
               }
               result.success(null)
+          } catch (e: CancellationException) {
+              // Intentional stop via stopMessageStream() (e.g. archive import /
+              // account switch). Not a failure — rethrow to honor structured
+              // concurrency; do NOT call result.error (the subscribe invoke is
+              // fire-and-forget on the Dart side).
+              println("Android message stream cancelled")
+              throw e
           } catch (e: Exception) {
               println("Android Subscribed to all messages ERROR")
               result.error("SUBSCRIPTION_FAILED", e.message, null)

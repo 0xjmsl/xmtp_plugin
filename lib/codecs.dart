@@ -297,11 +297,18 @@ class AttachmentContent {
   final String filename;
   final String? description;
 
+  /// True when this attachment is a sticker (keyboard / IME insertion).
+  /// Carried on the wire as the string parameter `isSticker:"true"` on the
+  /// standard `xmtp.org/attachment` codec — non-PublicOS clients ignore the
+  /// unknown param and still render the image. Receivers render it bubble-less.
+  final bool isSticker;
+
   AttachmentContent({
     required this.data,
     required this.mimeType,
     required this.filename,
     this.description,
+    this.isSticker = false,
   });
 
 // In codecs.dart - Improved AttachmentContent.fromJson
@@ -343,6 +350,7 @@ class AttachmentContent {
       mimeType: json['mimeType'] as String? ?? 'application/octet-stream',
       data: dataBytes,
       description: json['description'] as String?,
+      isSticker: json['isSticker'] == true || json['isSticker'] == 'true',
     );
   }
 
@@ -354,6 +362,7 @@ class AttachmentContent {
       // Always encode binary data as base64 string for consistent storage
       'data': base64Encode(data),
       if (description != null) 'description': description,
+      if (isSticker) 'isSticker': true,
     };
   }
 }
@@ -383,6 +392,7 @@ class AttachmentCodec extends XMTPCodec {
         'filename': content.filename,
         'mimeType': content.mimeType,
         if (content.description != null) 'description': content.description!,
+        if (content.isSticker) 'isSticker': 'true',
       }
     };
   }
@@ -394,13 +404,16 @@ class AttachmentCodec extends XMTPCodec {
       mimeType: encodedContent.parameters['mimeType'] ?? 'application/octet-stream',
       filename: encodedContent.parameters['filename'] ?? 'attachment',
       description: encodedContent.parameters['description'],
+      isSticker: encodedContent.parameters['isSticker'] == 'true',
     );
   }
 
   @override
   String? getFallback(dynamic content) {
     if (content is AttachmentContent) {
-      return '[Attachment: ${content.filename}]';
+      return content.isSticker
+          ? '[Sticker]'
+          : '[Attachment: ${content.filename}]';
     }
     return null;
   }

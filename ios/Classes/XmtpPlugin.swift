@@ -19,6 +19,11 @@ struct GroupOptions {
 public class XmtpPlugin: NSObject, FlutterPlugin {
     private var client: XMTP.Client?
     private var channel: FlutterMethodChannel?
+    // Holds the streamAllMessages Task so it can be cancelled explicitly
+    // (stopMessageStream). Without this the Task is fire-and-forget and the
+    // Dart-side subscription cancel never reaches the native loop — see
+    // stopMessageStream() / threads/xmtp_backup_restore stream-pause fix.
+    private var messageStreamTask: Task<Void, Never>?
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "xmtp_plugin", binaryMessenger: registrar.messenger())
@@ -84,6 +89,11 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             
         case "subscribeToAllMessages":
             subscribeToAllMessages(result: result)
+
+        case "stopMessageStream":
+            messageStreamTask?.cancel()
+            messageStreamTask = nil
+            result(nil)
 
         case "getConversationConsentState":
             guard let args = call.arguments as? [String: Any],
@@ -1755,9 +1765,16 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             return
         }
         
-        Task {
+        // Cancel any prior loop before starting a new one — a leftover Task
+        // would double-deliver every message. Hold the Task so stopMessageStream()
+        // can cancel it (the Dart subscription cancel does NOT reach this Task).
+        messageStreamTask?.cancel()
+        messageStreamTask = Task {
             do {
                 for try await message in client.conversations.streamAllMessages() {
+                    // Honor an explicit stopMessageStream() promptly even if the
+                    // libxmtp async sequence doesn't break on cancel on its own.
+                    try Task.checkCancellation()
                     // Find the conversation to get member information
                     if let conversation = try await client.conversations.findConversationByTopic(topic: message.topic) {
                         let members: [Member]
@@ -1780,6 +1797,11 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                 DispatchQueue.main.async {
                     result(nil)
                 }
+            } catch is CancellationError {
+                // Intentional stop via stopMessageStream() (e.g. archive import /
+                // account switch). Not a failure — do NOT call result with an
+                // error (the subscribe invoke is fire-and-forget on Dart side).
+                print("iOS message stream cancelled")
             } catch {
                 DispatchQueue.main.async {
                     result(FlutterError(code: "SUBSCRIPTION_FAILED", message: error.localizedDescription, details: nil))
@@ -1787,7 +1809,7 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             }
         }
     }
-    
+
     // MARK: - Attachment Support
     private func loadRemoteAttachment(args: [String: Any], result: @escaping FlutterResult) {
         Task {

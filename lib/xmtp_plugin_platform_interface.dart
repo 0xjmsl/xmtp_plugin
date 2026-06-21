@@ -87,6 +87,17 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('subscribeToAllMessages() has not been implemented.');
   }
 
+  /// Stop the *native* incoming-message stream loop.
+  ///
+  /// Default is a deliberate no-op: on Windows/Web the native stream stops the
+  /// moment the Dart subscription is cancelled (FRB drops the future / JS
+  /// callback is released), so there is nothing extra to do. Android and iOS
+  /// run the stream as a fire-and-forget coroutine/Task that the Dart-side
+  /// cancel does NOT reach, so they override this to cancel it explicitly.
+  Future<void> stopMessageStream() async {
+    // no-op by default — see doc comment above.
+  }
+
   Future<List<Map<String, dynamic>>> getMessagesAfterDate(String peerAddress, DateTime fromDate) {
     throw UnimplementedError('getMessagesAfterDate() has not been implemented.');
   }

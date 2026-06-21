@@ -72,7 +72,7 @@ class XmtpPlugin {
 
   /// Export an encrypted archive of the active inbox's messages/consent to
   /// [path] (a `.xmtpBak` file). [password] derives the key; an empty
-  /// [elements] archives both Messages + Consent (the upstream default).
+  /// [elements] archives both Messages + Consent.
   Future<void> exportArchive(
     String path,
     String password, {
@@ -82,10 +82,18 @@ class XmtpPlugin {
     bool excludeDisappearing = false,
   }) async {
     final key = await _deriveArchiveKey(password);
+    // Normalise "archive everything" HERE, once, for every platform. The
+    // Android/iOS SDKs treat an empty selection as "both", but the Windows/Rust
+    // path (and upstream xmtp_archive's BatchExportStream) treats an empty
+    // `elements` as "archive NOTHING" — yielding a metadata-only empty archive.
+    // Defaulting at the facade keeps the on-disk result identical cross-platform.
+    final selected = elements.isEmpty
+        ? const [BackupElement.messages, BackupElement.consent]
+        : elements;
     return _platform.createArchive(
       path,
       key,
-      elements: elements.map((e) => e.name).toList(),
+      elements: selected.map((e) => e.name).toList(),
       startNs: startNs,
       endNs: endNs,
       excludeDisappearing: excludeDisappearing,
@@ -172,6 +180,13 @@ class XmtpPlugin {
     );
   }
 
+  /// Stop the native incoming-message stream loop. No-op on Windows/Web (the
+  /// Dart subscription cancel already stops it); Android/iOS cancel the held
+  /// coroutine/Task. Pair this with cancelling the Dart subscription to fully
+  /// quiet the stream — e.g. before a heavy local libxmtp op (archive import)
+  /// that must not race the stream on the shared single tokio runtime.
+  Future<void> stopMessageStream() => _platform.stopMessageStream();
+
   Stream<Map<String, dynamic>> subscribeToAllMessages() {
     final controller = StreamController<Map<String, dynamic>>();
     final rawStream = _platform.subscribeToAllMessages();
@@ -206,6 +221,7 @@ class XmtpPlugin {
                   filename: encodedContent.parameters['filename'] ?? decodedContent.filename,
                   mimeType: encodedContent.parameters['mimeType'] ?? decodedContent.mimeType,
                   description: decodedContent.description,
+                  isSticker: decodedContent.isSticker,
                 );
                 print('Attachment content updated with parameters: $decodedContent');
               }
@@ -269,6 +285,7 @@ class XmtpPlugin {
                 filename: encodedContent.parameters['filename'] ?? decodedContent.filename,
                 mimeType: encodedContent.parameters['mimeType'] ?? decodedContent.mimeType,
                 description: decodedContent.description,
+                isSticker: decodedContent.isSticker,
               );
             }
 

@@ -157,6 +157,11 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
   }
 
   @override
+  Future<void> stopMessageStream() async {
+    await methodChannel.invokeMethod('stopMessageStream');
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> getMessagesAfterDate(String peerAddress, DateTime fromDate) async {
     final List<dynamic> result = await methodChannel.invokeMethod('getMessagesAfterDate', {
       'peerAddress': peerAddress,

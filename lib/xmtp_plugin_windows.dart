@@ -194,6 +194,14 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
   }
 
   @override
+  Future<void> stopMessageStream() async {
+    // Deliberate no-op on Windows: the Rust stream runs only until the Dart
+    // side cancels the subscription (FRB drops the future) — cancelling the
+    // Dart subscription in disposeMessages() already stops the native stream.
+    // Override exists for discoverability; there is nothing extra to do here.
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> getMessagesAfterDate(
       String peerAddress, DateTime fromDate) async {
     await _ensureInitialized();
