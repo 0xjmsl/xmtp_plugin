@@ -76,6 +76,12 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
   }
 
   @override
+  Future<bool> closeClient() async {
+    await _ensureInitialized();
+    return rust_client.closeClient();
+  }
+
+  @override
   Future<String?> getClientAddress() async {
     await _ensureInitialized();
     return rust_client.getClientAddress();
@@ -649,6 +655,30 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
     await rust_client.staticDeleteLocalDatabase(
       address: address,
     );
+  }
+
+  @override
+  Future<bool> staticLocalDatabaseExists(String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) async {
+    // Windows keys the DB file on the address prefix; inboxId/env unused.
+    await _ensureInitialized();
+    return rust_client.staticLocalDatabaseExists(address: address);
+  }
+
+  @override
+  Future<void> staticExportLocalDatabase(String destPath, String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) async {
+    await _ensureInitialized();
+    await rust_client.staticExportLocalDatabase(
+        address: address, destPath: destPath);
+  }
+
+  @override
+  Future<void> staticImportLocalDatabase(String sourcePath, String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) async {
+    await _ensureInitialized();
+    await rust_client.staticImportLocalDatabase(
+        address: address, sourcePath: sourcePath);
   }
 
   // ============================================================================

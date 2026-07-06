@@ -90,14 +90,14 @@ void main() {
     await xmtp.initializeClient(pk, dbKey);
     final state = await xmtp.inboxState(refreshFromNetwork: true);
 
-    expect(state['inbox_id'], isNotNull);
+    expect(state['inboxId'], isNotNull);
     expect(state['installations'], isA<List>());
     expect((state['installations'] as List).length, greaterThanOrEqualTo(1));
     expect(state['identities'], isA<List>());
-    expect(state['recovery_identity'], isNotNull);
+    expect(state['recoveryIdentity'], isNotNull);
 
     print('Inbox state:');
-    print('  inbox_id: ${state['inbox_id']}');
+    print('  inboxId: ${state['inboxId']}');
     print('  installations: ${(state['installations'] as List).length}');
     print('  identities: ${(state['identities'] as List).length}');
     for (final ident in (state['identities'] as List)) {

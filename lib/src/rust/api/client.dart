@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `eth_address_from_key`, `resolve_environment`
+// These functions are ignored because they are not marked as `pub`: `eth_address_from_key`, `local_db_path`, `resolve_environment`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ClientState`
 
 /// Returns the platform version string.
@@ -32,10 +32,42 @@ Future<String?> staticGetInboxIdForAddress(
     RustLib.instance.api.crateApiClientStaticGetInboxIdForAddress(
         address: address, environment: environment);
 
+/// Close and drop the active client, releasing its database connection so the
+/// DB files can be safely deleted, copied, or reopened. Background workers may
+/// still hold Arc references to the client, so simply replacing the global is
+/// NOT enough to close the DB file on Windows — `release_db_connection` is.
+/// Returns `true` if a client was closed, `false` if none was active.
+Future<bool> closeClient() => RustLib.instance.api.crateApiClientCloseClient();
+
+/// Whether a local XMTP database exists for the address.
+/// Does NOT require an initialized client.
+Future<bool> staticLocalDatabaseExists({required String address}) =>
+    RustLib.instance.api
+        .crateApiClientStaticLocalDatabaseExists(address: address);
+
+/// Copy the local XMTP database file to `dest_path` (raw-DB backup download).
+/// The active client MUST be closed first (`close_client`) — copying a live
+/// sqlite file is unsafe and the open handle may block the copy on Windows.
+Future<void> staticExportLocalDatabase(
+        {required String address, required String destPath}) =>
+    RustLib.instance.api.crateApiClientStaticExportLocalDatabase(
+        address: address, destPath: destPath);
+
+/// Place a raw-DB backup file at the conventional local path for the address
+/// (raw-DB restore). Errors if a local database already exists — delete it
+/// first (`static_delete_local_database`) so a restore is always explicit.
+Future<void> staticImportLocalDatabase(
+        {required String address, required String sourcePath}) =>
+    RustLib.instance.api.crateApiClientStaticImportLocalDatabase(
+        address: address, sourcePath: sourcePath);
+
 /// Delete the local XMTP database files for a given address.
 /// Removes the .db3, .db3-wal, and .db3-shm files.
 /// Does NOT require an initialized client.
 /// On Windows, the DB path is based on the address prefix (not inbox ID).
+///
+/// Errors LOUDLY if a file exists but cannot be removed (e.g. still open by a
+/// live client — call `close_client` first). A missing file is not an error.
 Future<void> staticDeleteLocalDatabase({required String address}) =>
     RustLib.instance.api
         .crateApiClientStaticDeleteLocalDatabase(address: address);

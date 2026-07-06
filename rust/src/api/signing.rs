@@ -265,7 +265,7 @@ pub async fn static_revoke_installations(
     // Create lightweight API connection
     let api_client = MessageBackendBuilder::default()
         .v3_host(grpc_host)
-        .maybe_gateway_host(Some("https://payer.testnet.xmtp.network:443".to_string()))
+        .maybe_gateway_host(None::<String>) // d14n gateway breaks v3 identity reads — pure v3 mode (same as initialize_client)
         .is_secure(is_secure)
         .build()
         .map_err(|e| anyhow!("Failed to build API client: {e}"))?;
@@ -323,7 +323,7 @@ pub async fn static_inbox_states_for_inbox_ids(
     // Create lightweight API connection
     let api_client = MessageBackendBuilder::default()
         .v3_host(grpc_host)
-        .maybe_gateway_host(Some("https://payer.testnet.xmtp.network:443".to_string()))
+        .maybe_gateway_host(None::<String>) // d14n gateway breaks v3 identity reads — pure v3 mode (same as initialize_client)
         .is_secure(is_secure)
         .build()
         .map_err(|e| anyhow!("Failed to build API client: {e}"))?;

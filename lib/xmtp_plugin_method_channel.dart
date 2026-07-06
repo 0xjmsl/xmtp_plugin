@@ -38,6 +38,51 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
   }
 
   @override
+  Future<bool> closeClient() async {
+    final closed = await methodChannel.invokeMethod<bool>('closeClient');
+    return closed ?? false;
+  }
+
+  @override
+  Future<bool> staticLocalDatabaseExists(String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) async {
+    final exists = await methodChannel.invokeMethod<bool>(
+      'staticLocalDatabaseExists',
+      {
+        'address': address,
+        if (inboxId != null) 'inboxId': inboxId,
+        'environment': environment,
+        if (dbDirectory != null) 'dbDirectory': dbDirectory,
+      },
+    );
+    return exists ?? false;
+  }
+
+  @override
+  Future<void> staticExportLocalDatabase(String destPath, String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) async {
+    await methodChannel.invokeMethod('staticExportLocalDatabase', {
+      'destPath': destPath,
+      'address': address,
+      if (inboxId != null) 'inboxId': inboxId,
+      'environment': environment,
+      if (dbDirectory != null) 'dbDirectory': dbDirectory,
+    });
+  }
+
+  @override
+  Future<void> staticImportLocalDatabase(String sourcePath, String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) async {
+    await methodChannel.invokeMethod('staticImportLocalDatabase', {
+      'sourcePath': sourcePath,
+      'address': address,
+      if (inboxId != null) 'inboxId': inboxId,
+      'environment': environment,
+      if (dbDirectory != null) 'dbDirectory': dbDirectory,
+    });
+  }
+
+  @override
   Future<String?> getClientAddress() async {
     final address = await methodChannel.invokeMethod<String>('getClientAddress');
     return address;
@@ -163,20 +208,26 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
 
   @override
   Future<List<Map<String, dynamic>>> getMessagesAfterDate(String peerAddress, DateTime fromDate) async {
-    final List<dynamic> result = await methodChannel.invokeMethod('getMessagesAfterDate', {
+    // Native returns null when the conversation/topic isn't known locally —
+    // treat that as "no messages", not a crash.
+    final result = await methodChannel.invokeMethod('getMessagesAfterDate', {
       'peerAddress': peerAddress,
       'fromDate': fromDate.millisecondsSinceEpoch,
     });
-    return result.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    return ((result as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
   }
 
   @override
   Future<List<Map<String, dynamic>>> getMessagesAfterDateByTopic(String topic, DateTime fromDate) async {
-    final List<dynamic> result = await methodChannel.invokeMethod('getMessagesAfterDateByTopic', {
+    final result = await methodChannel.invokeMethod('getMessagesAfterDateByTopic', {
       'topic': topic,
       'fromDate': fromDate.millisecondsSinceEpoch,
     });
-    return result.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    return ((result as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
   }
 
   @override

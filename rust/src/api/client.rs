@@ -91,20 +91,157 @@ pub async fn static_get_inbox_id_for_address(
     Ok(inbox_id_map.get(&api_ident).cloned())
 }
 
-/// Delete the local XMTP database files for a given address.
-/// Removes the .db3, .db3-wal, and .db3-shm files.
-/// Does NOT require an initialized client.
-/// On Windows, the DB path is based on the address prefix (not inbox ID).
-pub fn static_delete_local_database(address: String) -> Result<()> {
-    let db_dir = std::env::temp_dir().join("xmtp_plugin");
+/// Close and drop the active client, releasing its database connection so the
+/// DB files can be safely deleted, copied, or reopened. Background workers may
+/// still hold Arc references to the client, so simply replacing the global is
+/// NOT enough to close the DB file on Windows — `release_db_connection` is.
+/// Returns `true` if a client was closed, `false` if none was active.
+pub async fn close_client() -> Result<bool> {
+    let state = {
+        let mut guard = CLIENT
+            .lock()
+            .map_err(|_| anyhow!("Client mutex poisoned"))?;
+        guard.take()
+    };
+    match state {
+        Some(state) => {
+            state
+                .inner_client
+                .release_db_connection()
+                .map_err(|e| anyhow!("Failed to release DB connection: {e}"))?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// Conventional local DB path for an address on Windows: the plugin keys the
+/// file on the wallet-address prefix, not the inbox id (see initialize_client).
+fn local_db_path(address: &str) -> Result<std::path::PathBuf> {
     if address.len() < 10 {
         return Err(anyhow!("Invalid address: too short"));
     }
-    let db_path = db_dir.join(format!("{}.db3", &address[2..10]));
+    Ok(std::env::temp_dir()
+        .join("xmtp_plugin")
+        .join(format!("{}.db3", &address[2..10])))
+}
 
-    let _ = std::fs::remove_file(&db_path);
-    let _ = std::fs::remove_file(db_path.with_extension("db3-wal"));
-    let _ = std::fs::remove_file(db_path.with_extension("db3-shm"));
+/// Whether a local XMTP database exists for the address.
+/// Does NOT require an initialized client.
+pub fn static_local_database_exists(address: String) -> Result<bool> {
+    Ok(local_db_path(&address)?.exists())
+}
+
+/// The SQLCipher salt sidecar for a DB path (`<db>.sqlcipher_salt`). libxmtp
+/// stores the salt OUTSIDE the .db3 (plaintext-header mode), so the .db3 + key
+/// alone cannot be decrypted — the salt is essential and must travel with the
+/// backup.
+fn salt_sidecar(db_path: &std::path::Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}.sqlcipher_salt", db_path.to_string_lossy()))
+}
+
+/// Backup container magic — a bundle of the .db3 plus its salt sidecar.
+/// Layout: b"XSB1" | u64 LE db_len | db bytes | salt bytes (0..N).
+const BACKUP_MAGIC: &[u8; 4] = b"XSB1";
+
+/// Export the local XMTP database as a single backup file that bundles the
+/// `.db3` AND its `.sqlcipher_salt` sidecar (both are required to decrypt).
+/// The active client MUST be closed first (`close_client`) — copying a live
+/// sqlite file is unsafe and the open handle may block the copy on Windows.
+pub fn static_export_local_database(address: String, dest_path: String) -> Result<()> {
+    let src = local_db_path(&address)?;
+    if !src.exists() {
+        return Err(anyhow!("No local database for address {address}"));
+    }
+    let db_bytes = std::fs::read(&src)
+        .map_err(|e| anyhow!("Failed to read database: {e}"))?;
+    let salt_path = salt_sidecar(&src);
+    let salt_bytes = if salt_path.exists() {
+        std::fs::read(&salt_path).map_err(|e| anyhow!("Failed to read salt: {e}"))?
+    } else {
+        Vec::new()
+    };
+    let mut out = Vec::with_capacity(12 + db_bytes.len() + salt_bytes.len());
+    out.extend_from_slice(BACKUP_MAGIC);
+    out.extend_from_slice(&(db_bytes.len() as u64).to_le_bytes());
+    out.extend_from_slice(&db_bytes);
+    out.extend_from_slice(&salt_bytes);
+    std::fs::write(&dest_path, &out)
+        .map_err(|e| anyhow!("Failed to write backup: {e}"))?;
+    Ok(())
+}
+
+/// Restore a backup file to the conventional local path for the address:
+/// unbundles the `.db3` + `.sqlcipher_salt` (or, for a legacy raw-.db3 backup
+/// with no magic, writes the whole file as the .db3). Errors if a local
+/// database already exists — delete it first so a restore is always explicit.
+pub fn static_import_local_database(address: String, source_path: String) -> Result<()> {
+    let source = std::path::Path::new(&source_path);
+    if !source.exists() {
+        return Err(anyhow!("Backup file not found: {source_path}"));
+    }
+    let target = local_db_path(&address)?;
+    if target.exists() {
+        return Err(anyhow!(
+            "A local database for address {address} already exists — delete it before restoring"
+        ));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let salt_target = salt_sidecar(&target);
+    let data = std::fs::read(source)
+        .map_err(|e| anyhow!("Failed to read backup: {e}"))?;
+    if data.len() >= 12 && &data[0..4] == BACKUP_MAGIC {
+        let db_len =
+            u64::from_le_bytes(data[4..12].try_into().unwrap()) as usize;
+        if 12 + db_len > data.len() {
+            return Err(anyhow!("Corrupt backup: db length exceeds file size"));
+        }
+        std::fs::write(&target, &data[12..12 + db_len])
+            .map_err(|e| anyhow!("Failed to write database: {e}"))?;
+        let salt = &data[12 + db_len..];
+        if !salt.is_empty() {
+            std::fs::write(&salt_target, salt)
+                .map_err(|e| anyhow!("Failed to write salt: {e}"))?;
+        }
+    } else {
+        // Legacy raw-.db3 backup (no salt bundled) — best effort; will only
+        // decrypt if a matching salt sidecar already exists at the target.
+        std::fs::write(&target, &data)
+            .map_err(|e| anyhow!("Failed to write database: {e}"))?;
+    }
+    // Stale sidecars from a previous life would corrupt the restored DB.
+    let _ = std::fs::remove_file(target.with_extension("db3-wal"));
+    let _ = std::fs::remove_file(target.with_extension("db3-shm"));
+    Ok(())
+}
+
+/// Delete the local XMTP database files for a given address.
+/// Removes the .db3, .db3-wal, .db3-shm, AND the .sqlcipher_salt sidecar.
+/// Does NOT require an initialized client.
+/// On Windows, the DB path is based on the address prefix (not inbox ID).
+///
+/// Errors LOUDLY if a file exists but cannot be removed (e.g. still open by a
+/// live client — call `close_client` first). A missing file is not an error.
+pub fn static_delete_local_database(address: String) -> Result<()> {
+    let db_path = local_db_path(&address)?;
+
+    for path in [
+        db_path.clone(),
+        db_path.with_extension("db3-wal"),
+        db_path.with_extension("db3-shm"),
+        salt_sidecar(&db_path),
+    ] {
+        if let Err(e) = std::fs::remove_file(&path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(anyhow!(
+                    "Failed to delete {}: {e}",
+                    path.to_string_lossy()
+                ));
+            }
+        }
+    }
 
     Ok(())
 }

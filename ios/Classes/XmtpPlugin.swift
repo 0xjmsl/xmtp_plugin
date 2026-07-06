@@ -56,7 +56,11 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             
         case "getClientInboxId":
             getClientInboxId(result: result)
-            
+
+        case "closeClient":
+            closeClient(result: result)
+
+
         case "sendMessage":
             guard let args = call.arguments as? [String: Any],
                   let recipientAddress = args["recipientAddress"] as? String,
@@ -466,6 +470,40 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             let dbDirectory = args["dbDirectory"] as? String
             staticDeleteLocalDatabase(inboxId: inboxId, environment: environment, dbDirectory: dbDirectory, result: result)
 
+        case "staticLocalDatabaseExists":
+            let args = call.arguments as? [String: Any] ?? [:]
+            staticLocalDatabaseExists(
+                inboxId: args["inboxId"] as? String,
+                environment: args["environment"] as? String ?? "production",
+                dbDirectory: args["dbDirectory"] as? String,
+                result: result)
+
+        case "staticExportLocalDatabase":
+            guard let args = call.arguments as? [String: Any],
+                  let destPath = args["destPath"] as? String else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "destPath is required", details: nil))
+                return
+            }
+            staticExportLocalDatabase(
+                inboxId: args["inboxId"] as? String,
+                environment: args["environment"] as? String ?? "production",
+                dbDirectory: args["dbDirectory"] as? String,
+                destPath: destPath,
+                result: result)
+
+        case "staticImportLocalDatabase":
+            guard let args = call.arguments as? [String: Any],
+                  let sourcePath = args["sourcePath"] as? String else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "sourcePath is required", details: nil))
+                return
+            }
+            staticImportLocalDatabase(
+                sourcePath: sourcePath,
+                inboxId: args["inboxId"] as? String,
+                environment: args["environment"] as? String ?? "production",
+                dbDirectory: args["dbDirectory"] as? String,
+                result: result)
+
         case "changeRecoveryIdentifier":
             // Not supported on iOS - only on web/JS
             result(FlutterError(code: "UNSUPPORTED_PLATFORM", message: "changeRecoveryIdentifier is only supported on web platforms", details: nil))
@@ -558,6 +596,23 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
         }
     }
     
+    /// Close and drop the active client, releasing its local-database
+    /// connection so the DB files can be safely deleted, copied, or reopened.
+    /// Returns true if a client was closed, false if none was active.
+    private func closeClient(result: @escaping FlutterResult) {
+        guard let c = client else {
+            result(false)
+            return
+        }
+        client = nil
+        do {
+            try c.dropLocalDatabaseConnection()
+            result(true)
+        } catch {
+            result(FlutterError(code: "CLOSE_CLIENT_FAILED", message: error.localizedDescription, details: nil))
+        }
+    }
+
     // MARK: - Client Info
     private func getClientAddress(result: @escaping FlutterResult) {
         guard let client = client else {
@@ -2156,13 +2211,17 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
                     let dbURL = baseDir.appendingPathComponent(alias)
                     // Main DB + SQLite sidecars. SQLite names WAL/SHM with a
                     // hyphen (`<db>-wal` / `<db>-shm`); older plugin builds wrote
-                    // `.wal` / `.shm` with a dot, so remove both spellings.
+                    // `.wal` / `.shm` with a dot, so remove both spellings. The
+                    // `.sqlcipher_salt` sidecar holds the SQLCipher salt (needed
+                    // to decrypt) — delete it too so a stale salt can't mask a
+                    // broken restore.
                     let candidates = [
                         dbURL.path,
                         dbURL.path + "-wal",
                         dbURL.path + "-shm",
                         dbURL.appendingPathExtension("wal").path,
                         dbURL.appendingPathExtension("shm").path,
+                        dbURL.path + ".sqlcipher_salt",
                     ]
                     for path in candidates where fm.fileExists(atPath: path) {
                         try fm.removeItem(atPath: path)
@@ -2187,6 +2246,137 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
         case .dev: return "grpc.dev.xmtp.network:443"
         case .production: return "grpc.production.xmtp.network:443"
         @unknown default: return env.rawValue
+        }
+    }
+
+    /// Base directory XMTPiOS stores the DB in — the caller-provided
+    /// dbDirectory (App Group container) when set, else Documents.
+    private func dbBaseDir(_ dbDirectory: String?) -> URL {
+        if let dbDirectory = dbDirectory {
+            return URL(fileURLWithPath: dbDirectory, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    }
+
+    /// Conventional DB file URL for (inboxId, environment). Prefers the
+    /// current alias; falls back to the legacy alias when only that exists.
+    private func localDbURL(inboxId: String, environment: String, dbDirectory: String?) -> URL {
+        let env = resolveEnvironment(environment)
+        let base = dbBaseDir(dbDirectory)
+        let current = base.appendingPathComponent("xmtp-\(env.rawValue)-\(inboxId).db3")
+        if FileManager.default.fileExists(atPath: current.path) { return current }
+        let legacy = base.appendingPathComponent("xmtp-\(Self.legacyRawValue(env))-\(inboxId).db3")
+        if FileManager.default.fileExists(atPath: legacy.path) { return legacy }
+        return current
+    }
+
+    /// Extract the inboxId from a conventional backup filename
+    /// (xmtp-<env>-<64-hex>.db3). Returns nil when the name doesn't carry one.
+    private static func inboxIdFromDbFileName(_ name: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: "xmtp-.+-([0-9a-fA-F]{64})\\.db3$"),
+              let match = regex.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
+              let range = Range(match.range(at: 1), in: name) else { return nil }
+        return String(name[range])
+    }
+
+    private func staticLocalDatabaseExists(inboxId: String?, environment: String, dbDirectory: String?, result: @escaping FlutterResult) {
+        guard let inboxId = inboxId, !inboxId.isEmpty else {
+            // The filename is keyed on the inboxId — without it the check is
+            // unknowable; report absent rather than guessing.
+            result(false)
+            return
+        }
+        let url = localDbURL(inboxId: inboxId, environment: environment, dbDirectory: dbDirectory)
+        result(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    private func staticExportLocalDatabase(inboxId: String?, environment: String, dbDirectory: String?, destPath: String, result: @escaping FlutterResult) {
+        guard let inboxId = inboxId, !inboxId.isEmpty else {
+            result(FlutterError(code: "STATIC_DB_EXPORT_FAILED", message: "inboxId is required to locate the database on iOS", details: nil))
+            return
+        }
+        let src = localDbURL(inboxId: inboxId, environment: environment, dbDirectory: dbDirectory)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: src.path) else {
+            result(FlutterError(code: "STATIC_DB_EXPORT_FAILED", message: "No local database for inbox \(inboxId)", details: nil))
+            return
+        }
+        do {
+            // Bundle the .db3 AND its .sqlcipher_salt sidecar (both required to
+            // decrypt). Container: "XSB1" | 8-byte LE db length | db | salt.
+            let dbData = try Data(contentsOf: src)
+            let saltPath = src.path + ".sqlcipher_salt"
+            let saltData = fm.fileExists(atPath: saltPath)
+                ? (try Data(contentsOf: URL(fileURLWithPath: saltPath))) : Data()
+            var container = Data()
+            container.append("XSB1".data(using: .ascii)!)
+            let n = UInt64(dbData.count)
+            var lenBytes = [UInt8](repeating: 0, count: 8)
+            for i in 0..<8 { lenBytes[i] = UInt8((n >> (8 * UInt64(i))) & 0xFF) }
+            container.append(contentsOf: lenBytes)
+            container.append(dbData)
+            container.append(saltData)
+            let dest = URL(fileURLWithPath: destPath)
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            try container.write(to: dest)
+            result(nil)
+        } catch {
+            result(FlutterError(code: "STATIC_DB_EXPORT_FAILED", message: error.localizedDescription, details: nil))
+        }
+    }
+
+    private func staticImportLocalDatabase(sourcePath: String, inboxId: String?, environment: String, dbDirectory: String?, result: @escaping FlutterResult) {
+        let fm = FileManager.default
+        let source = URL(fileURLWithPath: sourcePath)
+        guard fm.fileExists(atPath: source.path) else {
+            result(FlutterError(code: "STATIC_DB_IMPORT_FAILED", message: "Backup file not found: \(sourcePath)", details: nil))
+            return
+        }
+        let resolvedInboxId: String
+        if let inboxId = inboxId, !inboxId.isEmpty {
+            resolvedInboxId = inboxId
+        } else if let parsed = Self.inboxIdFromDbFileName(source.lastPathComponent) {
+            resolvedInboxId = parsed
+        } else {
+            result(FlutterError(code: "STATIC_DB_IMPORT_FAILED", message: "Cannot determine the inbox id: pass it explicitly or use a backup named xmtp-<env>-<inboxId>.db3", details: nil))
+            return
+        }
+        let env = resolveEnvironment(environment)
+        let target = dbBaseDir(dbDirectory).appendingPathComponent("xmtp-\(env.rawValue)-\(resolvedInboxId).db3")
+        guard !fm.fileExists(atPath: target.path) else {
+            result(FlutterError(code: "STATIC_DB_IMPORT_FAILED", message: "A local database for inbox \(resolvedInboxId) already exists — delete it before restoring", details: nil))
+            return
+        }
+        do {
+            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try Data(contentsOf: source)
+            let magic = "XSB1".data(using: .ascii)!
+            if data.count >= 12 && data.prefix(4) == magic {
+                // Bundled backup: split out the .db3 and the salt sidecar.
+                var dbLen: UInt64 = 0
+                for i in 0..<8 { dbLen |= UInt64(data[data.startIndex + 4 + i]) << (8 * UInt64(i)) }
+                let dbLenInt = Int(dbLen)
+                guard 12 + dbLenInt <= data.count else {
+                    result(FlutterError(code: "STATIC_DB_IMPORT_FAILED", message: "Corrupt backup: db length exceeds file size", details: nil))
+                    return
+                }
+                let base = data.startIndex
+                try data.subdata(in: (base + 12)..<(base + 12 + dbLenInt)).write(to: target)
+                let salt = data.subdata(in: (base + 12 + dbLenInt)..<data.endIndex)
+                if !salt.isEmpty {
+                    try salt.write(to: URL(fileURLWithPath: target.path + ".sqlcipher_salt"))
+                }
+            } else {
+                // Legacy raw-.db3 backup (no salt bundled) — best effort.
+                try data.write(to: target)
+            }
+            // Stale WAL/SHM from a previous life would corrupt the restored DB.
+            for sidecar in [target.path + "-wal", target.path + "-shm"] where fm.fileExists(atPath: sidecar) {
+                try fm.removeItem(atPath: sidecar)
+            }
+            result(nil)
+        } catch {
+            result(FlutterError(code: "STATIC_DB_IMPORT_FAILED", message: error.localizedDescription, details: nil))
         }
     }
 

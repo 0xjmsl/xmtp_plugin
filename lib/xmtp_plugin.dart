@@ -51,6 +51,14 @@ class XmtpPlugin {
     return address;
   }
 
+  /// Close and drop the active client, releasing its local-database
+  /// connection so the DB files can be safely deleted, copied (raw-DB
+  /// backup), or reopened by a later [initializeClient]. Returns `true` if a
+  /// client was closed, `false` if none was active. Safe to call repeatedly.
+  Future<bool> closeClient() async {
+    return _platform.closeClient();
+  }
+
   Future<String> getClientAddress() async {
     final String? clientAddress = await _platform.getClientAddress();
     return clientAddress ?? '';
@@ -538,6 +546,58 @@ class XmtpPlugin {
   }) async {
     return XmtpPluginPlatform.instance.staticDeleteLocalDatabase(address, inboxId,
         environment: environment, dbDirectory: dbDirectory);
+  }
+
+  /// Whether a local XMTP database exists for the identity — the pre-load
+  /// check for the "set up messaging on this device" flow. No client needed.
+  ///
+  /// [inboxId] is required to locate the file on Android/iOS (the SDK keys
+  /// the filename on it); Windows keys on the address and ignores it. When
+  /// the inboxId is unknown (key never activated on this device) Android/iOS
+  /// report `false` — unknowable is treated as absent, never guessed.
+  static Future<bool> staticLocalDatabaseExists(
+    String address, {
+    String? inboxId,
+    String environment = 'production',
+    String? dbDirectory,
+  }) async {
+    return XmtpPluginPlatform.instance.staticLocalDatabaseExists(address,
+        inboxId: inboxId, environment: environment, dbDirectory: dbDirectory);
+  }
+
+  /// Copy the local XMTP database file to [destPath] (raw-DB backup
+  /// download). The active client MUST be closed first ([closeClient]) —
+  /// copying a live sqlite file is unsafe. The exported file + the 32-byte
+  /// dbEncryptionKey together restore the SAME installation on another
+  /// device (no new installation registered, no inbox-slot burn).
+  static Future<void> staticExportLocalDatabase(
+    String destPath,
+    String address, {
+    String? inboxId,
+    String environment = 'production',
+    String? dbDirectory,
+  }) async {
+    return XmtpPluginPlatform.instance.staticExportLocalDatabase(destPath, address,
+        inboxId: inboxId, environment: environment, dbDirectory: dbDirectory);
+  }
+
+  /// Place a raw-DB backup file at the platform-conventional local path for
+  /// the identity (raw-DB restore). Errors if a local database already
+  /// exists — delete it first so a restore is always explicit. On
+  /// Android/iOS the target filename needs the [inboxId]; when omitted it is
+  /// parsed from a conventionally named source file
+  /// (`xmtp-<env>-<inboxId>.db3`) and the call errors if neither is
+  /// available. After this, [initializeClient] with the matching
+  /// dbEncryptionKey opens the restored installation.
+  static Future<void> staticImportLocalDatabase(
+    String sourcePath,
+    String address, {
+    String? inboxId,
+    String environment = 'production',
+    String? dbDirectory,
+  }) async {
+    return XmtpPluginPlatform.instance.staticImportLocalDatabase(sourcePath, address,
+        inboxId: inboxId, environment: environment, dbDirectory: dbDirectory);
   }
 
   Future<void> changeRecoveryIdentifier(Uint8List signerPrivateKey, String newRecoveryIdentifier) async {

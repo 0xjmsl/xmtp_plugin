@@ -80,6 +80,9 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
           result.error("INVALID_ARGUMENTS", "Key and dbKey are required", null)
         }
       }
+      "closeClient" -> {
+        closeClient(result)
+      }
       "getClientAddress" -> {
         getClientAddress(result)
       }
@@ -604,6 +607,31 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
           result.error("INVALID_ARGUMENTS", "inboxId is required", null)
         }
       }
+      "staticLocalDatabaseExists" -> {
+        val inboxId = call.argument<String>("inboxId")
+        val environment = call.argument<String>("environment") ?: "production"
+        staticLocalDatabaseExists(inboxId, environment, result)
+      }
+      "staticExportLocalDatabase" -> {
+        val inboxId = call.argument<String>("inboxId")
+        val environment = call.argument<String>("environment") ?: "production"
+        val destPath = call.argument<String>("destPath")
+        if (destPath != null) {
+          staticExportLocalDatabase(inboxId, environment, destPath, result)
+        } else {
+          result.error("INVALID_ARGUMENTS", "destPath is required", null)
+        }
+      }
+      "staticImportLocalDatabase" -> {
+        val inboxId = call.argument<String>("inboxId")
+        val environment = call.argument<String>("environment") ?: "production"
+        val sourcePath = call.argument<String>("sourcePath")
+        if (sourcePath != null) {
+          staticImportLocalDatabase(sourcePath, inboxId, environment, result)
+        } else {
+          result.error("INVALID_ARGUMENTS", "sourcePath is required", null)
+        }
+      }
       "changeRecoveryIdentifier" -> {
         // Not supported on Android - only on web/JS
         result.error("UNSUPPORTED_PLATFORM", "changeRecoveryIdentifier is only supported on web platforms", null)
@@ -686,6 +714,26 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
         result.success(client?.publicIdentity?.identifier)
       } catch (e: Exception) {
         result.error("CLIENT_INITIALIZATION_FAILED", e.message, null)
+      }
+    }
+  }
+
+  /// Close and drop the active client, releasing its local-database
+  /// connection so the DB files can be safely deleted, copied, or reopened.
+  /// Returns true if a client was closed, false if none was active.
+  private fun closeClient(result: Result) {
+    scope.launch {
+      try {
+        val c = client
+        if (c == null) {
+          result.success(false)
+          return@launch
+        }
+        client = null
+        c.dropLocalDatabaseConnection()
+        result.success(true)
+      } catch (e: Exception) {
+        result.error("CLOSE_CLIENT_FAILED", e.message, null)
       }
     }
   }
@@ -1721,8 +1769,13 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
   private fun revokeInstallations(signerPrivateKey: ByteArray, installationIds: List<String>, result: Result) {
     scope.launch {
       try {
+        val c = client
+        if (c == null) {
+          result.error("CLIENT_NOT_INITIALIZED", "XMTP client has not been initialized", null)
+          return@launch
+        }
         val signer = PrivateKeyBuilder(PrivateKeyBuilder.buildFromPrivateKeyData(signerPrivateKey))
-        client?.revokeInstallations(signer, installationIds)
+        c.revokeInstallations(signer, installationIds)
         result.success(null)
       } catch (e: Exception) {
         result.error("REVOKE_INSTALLATIONS_FAILED", e.message, null)
@@ -1733,8 +1786,13 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
   private fun revokeAllOtherInstallations(signerPrivateKey: ByteArray, result: Result) {
     scope.launch {
       try {
+        val c = client
+        if (c == null) {
+          result.error("CLIENT_NOT_INITIALIZED", "XMTP client has not been initialized", null)
+          return@launch
+        }
         val signer = PrivateKeyBuilder(PrivateKeyBuilder.buildFromPrivateKeyData(signerPrivateKey))
-        client?.revokeAllOtherInstallations(signer)
+        c.revokeAllOtherInstallations(signer)
         result.success(null)
       } catch (e: Exception) {
         result.error("REVOKE_ALL_OTHER_INSTALLATIONS_FAILED", e.message, null)
@@ -1745,8 +1803,13 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
   private fun addAccount(newAccountPrivateKey: ByteArray, allowReassignInboxId: Boolean, result: Result) {
     scope.launch {
       try {
+        val c = client
+        if (c == null) {
+          result.error("CLIENT_NOT_INITIALIZED", "XMTP client has not been initialized", null)
+          return@launch
+        }
         val newAccount = PrivateKeyBuilder(PrivateKeyBuilder.buildFromPrivateKeyData(newAccountPrivateKey))
-        client?.addAccount(newAccount, allowReassignInboxId)
+        c.addAccount(newAccount, allowReassignInboxId)
         result.success(null)
       } catch (e: Exception) {
         result.error("ADD_ACCOUNT_FAILED", e.message, null)
@@ -1757,9 +1820,14 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
   private fun removeAccount(recoveryPrivateKey: ByteArray, identifierToRemove: String, result: Result) {
     scope.launch {
       try {
+        val c = client
+        if (c == null) {
+          result.error("CLIENT_NOT_INITIALIZED", "XMTP client has not been initialized", null)
+          return@launch
+        }
         val recoverAccount = PrivateKeyBuilder(PrivateKeyBuilder.buildFromPrivateKeyData(recoveryPrivateKey))
         val identityToRemove = PublicIdentity(IdentityKind.ETHEREUM, identifierToRemove)
-        client?.removeAccount(recoverAccount, identityToRemove)
+        c.removeAccount(recoverAccount, identityToRemove)
         result.success(null)
       } catch (e: Exception) {
         result.error("REMOVE_ACCOUNT_FAILED", e.message, null)
@@ -1839,24 +1907,133 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
   private fun staticDeleteLocalDatabase(inboxId: String, environment: String, result: Result) {
     scope.launch {
       try {
-        val env = when (environment) {
-          "dev" -> XMTPEnvironment.DEV
-          "local" -> XMTPEnvironment.LOCAL
-          else -> XMTPEnvironment.PRODUCTION
-        }
-        val alias = "xmtp-${env}-${inboxId}"
-        val dbDir = java.io.File(context.filesDir.absolutePath, "xmtp_db")
-        val dbFile = java.io.File(dbDir, "${alias}.db3")
+        val dbFile = localDbFile(inboxId, environment)
         if (dbFile.exists()) dbFile.delete()
-        // Also clean up WAL/SHM if present
-        val walFile = java.io.File(dbDir, "${alias}.db3-wal")
-        val shmFile = java.io.File(dbDir, "${alias}.db3-shm")
-        if (walFile.exists()) walFile.delete()
-        if (shmFile.exists()) shmFile.delete()
+        // Clean up WAL/SHM AND the SQLCipher salt sidecar if present. The salt
+        // is essential to decrypt the DB — leaving it behind masks a broken
+        // backup (a restore would silently reuse the stale salt).
+        for (suffix in listOf("-wal", "-shm", ".sqlcipher_salt")) {
+          val f = java.io.File("${dbFile.absolutePath}$suffix")
+          if (f.exists()) f.delete()
+        }
         result.success(null)
       } catch (e: Exception) {
         result.error("STATIC_DELETE_DB_FAILED", e.message, null)
       }
+    }
+  }
+
+  // Backup container magic — a bundle of the .db3 plus its .sqlcipher_salt
+  // sidecar (libxmtp stores the salt outside the .db3, so both are required to
+  // decrypt). Layout: "XSB1" | 8-byte LE db length | db bytes | salt bytes.
+  private val backupMagic = "XSB1".toByteArray(Charsets.US_ASCII)
+
+  /// Conventional DB file for (inboxId, environment) — the xmtp-android SDK
+  /// stores its store at filesDir/xmtp_db/xmtp-<ENV>-<inboxId>.db3.
+  private fun localDbFile(inboxId: String, environment: String): java.io.File {
+    val env = when (environment) {
+      "dev" -> XMTPEnvironment.DEV
+      "local" -> XMTPEnvironment.LOCAL
+      else -> XMTPEnvironment.PRODUCTION
+    }
+    val dbDir = java.io.File(context.filesDir.absolutePath, "xmtp_db")
+    return java.io.File(dbDir, "xmtp-${env}-${inboxId}.db3")
+  }
+
+  /// Extract the inboxId from a conventional backup filename
+  /// (xmtp-<ENV>-<64-hex>.db3). Returns null when the name doesn't carry one.
+  private fun inboxIdFromDbFileName(name: String): String? {
+    return Regex("xmtp-\\w+-([0-9a-fA-F]{64})\\.db3$").find(name)?.groupValues?.get(1)
+  }
+
+  private fun staticLocalDatabaseExists(inboxId: String?, environment: String, result: Result) {
+    try {
+      if (inboxId.isNullOrEmpty()) {
+        // Android's DB filename is keyed on the inboxId — without it the
+        // check is unknowable; report absent rather than guessing.
+        result.success(false)
+        return
+      }
+      result.success(localDbFile(inboxId, environment).exists())
+    } catch (e: Exception) {
+      result.error("STATIC_DB_EXISTS_FAILED", e.message, null)
+    }
+  }
+
+  private fun staticExportLocalDatabase(inboxId: String?, environment: String, destPath: String, result: Result) {
+    try {
+      if (inboxId.isNullOrEmpty()) {
+        result.error("STATIC_DB_EXPORT_FAILED", "inboxId is required to locate the database on Android", null)
+        return
+      }
+      val src = localDbFile(inboxId, environment)
+      if (!src.exists()) {
+        result.error("STATIC_DB_EXPORT_FAILED", "No local database for inbox $inboxId", null)
+        return
+      }
+      val dbBytes = src.readBytes()
+      val saltFile = java.io.File("${src.absolutePath}.sqlcipher_salt")
+      val saltBytes = if (saltFile.exists()) saltFile.readBytes() else ByteArray(0)
+      // Container: magic | 8-byte LE db length | db bytes | salt bytes.
+      val lenBuf = java.nio.ByteBuffer.allocate(8)
+          .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+          .putLong(dbBytes.size.toLong()).array()
+      java.io.File(destPath).outputStream().buffered().use { out ->
+        out.write(backupMagic)
+        out.write(lenBuf)
+        out.write(dbBytes)
+        out.write(saltBytes)
+      }
+      result.success(null)
+    } catch (e: Exception) {
+      result.error("STATIC_DB_EXPORT_FAILED", e.message, null)
+    }
+  }
+
+  private fun staticImportLocalDatabase(sourcePath: String, inboxId: String?, environment: String, result: Result) {
+    try {
+      val source = java.io.File(sourcePath)
+      if (!source.exists()) {
+        result.error("STATIC_DB_IMPORT_FAILED", "Backup file not found: $sourcePath", null)
+        return
+      }
+      val resolvedInboxId = if (!inboxId.isNullOrEmpty()) inboxId
+          else inboxIdFromDbFileName(source.name)
+      if (resolvedInboxId == null) {
+        result.error("STATIC_DB_IMPORT_FAILED",
+            "Cannot determine the inbox id: pass it explicitly or use a backup named xmtp-<env>-<inboxId>.db3", null)
+        return
+      }
+      val target = localDbFile(resolvedInboxId, environment)
+      if (target.exists()) {
+        result.error("STATIC_DB_IMPORT_FAILED",
+            "A local database for inbox $resolvedInboxId already exists — delete it before restoring", null)
+        return
+      }
+      target.parentFile?.mkdirs()
+      val saltTarget = java.io.File("${target.absolutePath}.sqlcipher_salt")
+      val data = source.readBytes()
+      if (data.size >= 12 && data.copyOfRange(0, 4).contentEquals(backupMagic)) {
+        // Bundled backup: split out the .db3 and the salt sidecar.
+        val dbLen = java.nio.ByteBuffer.wrap(data, 4, 8)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN).long.toInt()
+        if (12 + dbLen > data.size) {
+          result.error("STATIC_DB_IMPORT_FAILED", "Corrupt backup: db length exceeds file size", null)
+          return
+        }
+        target.writeBytes(data.copyOfRange(12, 12 + dbLen))
+        val salt = data.copyOfRange(12 + dbLen, data.size)
+        if (salt.isNotEmpty()) saltTarget.writeBytes(salt)
+      } else {
+        // Legacy raw-.db3 backup (no salt bundled) — best effort.
+        target.writeBytes(data)
+      }
+      // Stale WAL/SHM from a previous life would corrupt the restored DB.
+      java.io.File("${target.absolutePath}-wal").delete()
+      java.io.File("${target.absolutePath}-shm").delete()
+      result.success(null)
+    } catch (e: Exception) {
+      result.error("STATIC_DB_IMPORT_FAILED", e.message, null)
     }
   }
 

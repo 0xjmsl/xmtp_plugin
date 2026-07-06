@@ -1,3 +1,27 @@
+## 1.2.0
+
+Raw-database backup/restore, a client-close primitive, and revocation fixes. Additive — no breaking changes.
+
+### New: raw-database backup/restore (same-installation, no slot cost)
+
+Move an inbox's local database to another device as the **same installation** — the network sees one installation, so no device slot is spent (unlike an archive import, which registers a new installation). Three new static methods on `XmtpPlugin`, all client-independent:
+
+* **`staticExportLocalDatabase(destPath, address, {inboxId, environment, dbDirectory})`** — write the local DB to `destPath` as a single backup file. Close the active client first (`closeClient`) so the sqlite file is safe to copy.
+* **`staticImportLocalDatabase(sourcePath, address, {inboxId, environment, dbDirectory})`** — place a backup at the platform-conventional path. Refuses to overwrite an existing DB (restore is always explicit).
+* **`staticLocalDatabaseExists(address, {inboxId, environment, dbDirectory})`** — pre-load existence check. Android/iOS need the `inboxId` to locate the file; when it's unknown they report `false` (never guessed). Windows keys on the address.
+
+The backup file **bundles the `.db3` and its SQLCipher salt sidecar** (`<db>.db3.sqlcipher_salt`). libxmtp keeps the salt outside the `.db3`, so the DB file plus the 32-byte encryption key alone cannot be decrypted — the salt is essential and now travels inside the backup (the encryption key remains a separate secret you supply on restore). `staticDeleteLocalDatabase` now also removes the salt sidecar.
+
+### New: `closeClient()`
+
+Close and drop the active client, releasing its local-database connection so the DB files can be safely deleted, copied, or reopened. Returns `true` if a client was closed. Backgrounded workers can keep the DB file open otherwise (notably on Windows), so this is required before `staticDeleteLocalDatabase` or a raw-DB export.
+
+### Fixes
+
+* **Message reads no longer crash on an empty result.** `getMessagesAfterDate` / `getMessagesAfterDateByTopic` return `[]` when the native layer returns null (an unknown/unsynced conversation) instead of throwing a cast error.
+* **Static revoke / inbox-state calls dropped the d14n testnet gateway** and now use pure v3, matching client init — the gateway made `staticInboxStatesForInboxIds` / `staticRevokeInstallations` fail with "Missing identity update".
+* **Android: `revokeInstallations` / `revokeAllOtherInstallations` / `addAccount` / `removeAccount` now raise `CLIENT_NOT_INITIALIZED`** when no client is active, instead of silently succeeding.
+
 ## 1.1.0
 
 ### BREAKING: `sendMessageByInboxId` now returns `{messageId, topic}`

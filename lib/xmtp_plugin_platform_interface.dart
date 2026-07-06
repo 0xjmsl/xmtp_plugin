@@ -37,6 +37,25 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('initializeClient() has not been implemented.');
   }
 
+  Future<bool> closeClient() {
+    throw UnimplementedError('closeClient() has not been implemented.');
+  }
+
+  Future<bool> staticLocalDatabaseExists(String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) {
+    throw UnimplementedError('staticLocalDatabaseExists() has not been implemented.');
+  }
+
+  Future<void> staticExportLocalDatabase(String destPath, String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) {
+    throw UnimplementedError('staticExportLocalDatabase() has not been implemented.');
+  }
+
+  Future<void> staticImportLocalDatabase(String sourcePath, String address,
+      {String? inboxId, String environment = 'production', String? dbDirectory}) {
+    throw UnimplementedError('staticImportLocalDatabase() has not been implemented.');
+  }
+
   Future<String?> getClientAddress() {
     throw UnimplementedError('getClientAddress() has not been implemented.');
   }

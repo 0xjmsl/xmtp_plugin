@@ -10,8 +10,14 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`, `from`
 
 /// Write an encrypted archive of the active client's MLS store to `path`.
-/// `key` must be >= 32 bytes (first 32 used). An empty `elements` vec archives
-/// both Messages + Consent. Mirrors `bindings_ffi/src/mls.rs::create_archive`.
+/// `key` must be >= 32 bytes (first 32 used). Mirrors
+/// `bindings_ffi/src/mls.rs::create_archive`.
+///
+/// NOTE: an EMPTY `elements` vec archives NOTHING (metadata frame only) —
+/// upstream `xmtp_archive::BatchExportStream` builds one input stream per
+/// selected element, so empty ⇒ zero streams. The "empty = both" default is
+/// applied one layer up in the Dart facade `exportArchive`
+/// (`lib/xmtp_plugin.dart`); never call this with an empty vec expecting both.
 Future<void> createArchive(
         {required String path,
         required List<int> key,
