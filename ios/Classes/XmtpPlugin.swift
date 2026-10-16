@@ -451,6 +451,15 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             }
             staticInboxStatesForInboxIds(inboxIds: inboxIds, result: result)
 
+        case "staticCanMessage":
+            guard let args = call.arguments as? [String: Any],
+                  let addresses = args["addresses"] as? [String] else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "addresses is required", details: nil))
+                return
+            }
+            let environment = (args["environment"] as? String) ?? "production"
+            staticCanMessage(addresses: addresses, environment: environment, result: result)
+
         case "staticGetInboxIdForAddress":
             guard let args = call.arguments as? [String: Any],
                   let address = args["address"] as? String else {
@@ -2156,6 +2165,32 @@ public class XmtpPlugin: NSObject, FlutterPlugin {
             } catch {
                 DispatchQueue.main.async {
                     result(FlutterError(code: "STATIC_INBOX_STATES_FAILED", message: error.localizedDescription, details: nil))
+                }
+            }
+        }
+    }
+
+    // See the Android twin: the SDK's static canMessage asks the network from a
+    // throwaway unregistered client — no signature, no installation spent.
+    private func staticCanMessage(addresses: [String], environment: String, result: @escaping FlutterResult) {
+        Task {
+            do {
+                let env = resolveEnvironment(environment)
+                let api = ClientOptions.Api(env: env, isSecure: env != .local)
+                let identities = addresses.map { PublicIdentity(kind: .ethereum, identifier: $0) }
+                let canMessage = try await XMTP.Client.canMessage(accountIdentities: identities, api: api)
+                // Key the answer by the caller's own spelling (the SDK returns
+                // the normalized identifier).
+                var out: [String: Bool] = [:]
+                for address in addresses {
+                    out[address] = canMessage[address] ?? canMessage[address.lowercased()] ?? false
+                }
+                DispatchQueue.main.async {
+                    result(out)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "STATIC_CAN_MESSAGE_FAILED", message: error.localizedDescription, details: nil))
                 }
             }
         }

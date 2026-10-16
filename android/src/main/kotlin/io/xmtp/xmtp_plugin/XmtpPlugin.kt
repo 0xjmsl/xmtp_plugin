@@ -589,6 +589,15 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
           result.error("INVALID_ARGUMENTS", "inboxIds is required", null)
         }
       }
+      "staticCanMessage" -> {
+        val addresses = call.argument<List<String>>("addresses")
+        val environment = call.argument<String>("environment") ?: "production"
+        if (addresses != null) {
+          staticCanMessage(addresses, environment, result)
+        } else {
+          result.error("INVALID_ARGUMENTS", "addresses is required", null)
+        }
+      }
       "staticGetInboxIdForAddress" -> {
         val address = call.argument<String>("address")
         val environment = call.argument<String>("environment") ?: "production"
@@ -706,9 +715,6 @@ class XmtpPlugin: FlutterPlugin, MethodCallHandler {
         )
         client = null
         client = Client.create(account = wallet, options = options)
-        val clientIdentity = wallet.publicIdentity
-
-        Client.build(clientIdentity, options = options)
         Client.register(codec = RemoteAttachmentCodec())
         Client.register(codec = AttachmentCodec())
         result.success(client?.publicIdentity?.identifier)
@@ -1882,6 +1888,33 @@ private fun getGroupMemberRole(topic: String, inboxId: String, result: Result) {
         result.success(statesList)
       } catch (e: Exception) {
         result.error("STATIC_INBOX_STATES_FAILED", e.message, null)
+      }
+    }
+  }
+
+  // Registration test with no client of our own: the SDK's static canMessage
+  // builds a throwaway, UNREGISTERED client (zero address, in-memory db) just
+  // to ask the network. No signature, no installation spent.
+  private fun staticCanMessage(addresses: List<String>, environment: String, result: Result) {
+    scope.launch {
+      try {
+        val env = when (environment) {
+          "dev" -> XMTPEnvironment.DEV
+          "local" -> XMTPEnvironment.LOCAL
+          else -> XMTPEnvironment.PRODUCTION
+        }
+        val api = ClientOptions.Api(env, env != XMTPEnvironment.LOCAL)
+        val identities = addresses.map { PublicIdentity(IdentityKind.ETHEREUM, it) }
+        val canMessage = Client.canMessage(identities, api)
+        // Answer under the caller's own spelling: the SDK keys the map by the
+        // identifier it normalized (lowercased), which would silently miss for
+        // a checksummed address.
+        val out = addresses.associateWith { addr ->
+          canMessage[addr] ?: canMessage[addr.lowercase()] ?: false
+        }
+        result.success(out)
+      } catch (e: Exception) {
+        result.error("STATIC_CAN_MESSAGE_FAILED", e.message, null)
       }
     }
   }

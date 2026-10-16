@@ -317,8 +317,13 @@ pub async fn initialize_client(
     //    which implements XmtpApi + XmtpQuery (required by Client::builder).
     use xmtp_api::ApiClientWrapper;
     use xmtp_api_d14n::MessageBackendBuilder;
+    // Persist per-topic cursors in the client DB (as libxmtp's bindings_ffi does).
+    // Without it the backend uses NoCursorStore: every stream subscribes @0 and
+    // every group sync re-pages the whole history.
+    use xmtp_mls::cursor_store::SqliteCursorStore;
 
     let api_client = MessageBackendBuilder::default()
+        .cursor_store(SqliteCursorStore::new(store.db()))
         .v3_host(grpc_host)
         .maybe_gateway_host(None::<String>)
         .is_secure(is_secure)
@@ -327,6 +332,7 @@ pub async fn initialize_client(
         .build()
         .map_err(|e| anyhow!("Failed to build API client: {e}"))?;
     let sync_api_client = MessageBackendBuilder::default()
+        .cursor_store(SqliteCursorStore::new(store.db()))
         .v3_host(grpc_host)
         .maybe_gateway_host(None::<String>)
         .is_secure(is_secure)
@@ -392,13 +398,25 @@ pub async fn initialize_client(
                         "Inbox ID mismatch detected — deleting stale DB at {:?} and retrying",
                         db_path
                     );
-                    // Delete the stale DB file and retry
-                    let _ = std::fs::remove_file(&db_path);
-                    // Also remove WAL/SHM files if they exist
-                    let wal_path = db_path.with_extension("db3-wal");
-                    let shm_path = db_path.with_extension("db3-shm");
-                    let _ = std::fs::remove_file(&wal_path);
-                    let _ = std::fs::remove_file(&shm_path);
+                    // Delete the stale DB file and retry. LOUD on failure: on
+                    // Windows a still-open handle (previous client not closed
+                    // via close_client) makes remove_file fail, and silently
+                    // reopening the same file just reproduces the mismatch.
+                    // Also remove WAL/SHM files if they exist.
+                    for path in [
+                        db_path.clone(),
+                        db_path.with_extension("db3-wal"),
+                        db_path.with_extension("db3-shm"),
+                    ] {
+                        if let Err(io_err) = std::fs::remove_file(&path) {
+                            if io_err.kind() != std::io::ErrorKind::NotFound {
+                                return Err(anyhow!(
+                                    "Inbox ID mismatch (stored != network) and the stale DB                                      could not be deleted ({}): {io_err}. Close the previous                                      client (close_client) or restart the app, then retry.",
+                                    path.to_string_lossy()
+                                ));
+                            }
+                        }
+                    }
 
                     // Recreate DB and store
                     let db2 = NativeDb::new(&storage_opt, db_key)?;
@@ -406,6 +424,7 @@ pub async fn initialize_client(
 
                     // Rebuild API clients (consumed by first attempt)
                     let api_client2 = MessageBackendBuilder::default()
+                        .cursor_store(SqliteCursorStore::new(store2.db()))
                         .v3_host(grpc_host)
                         .maybe_gateway_host(None::<String>)
                         .is_secure(is_secure)
@@ -414,6 +433,7 @@ pub async fn initialize_client(
                         .build()
                         .map_err(|e| anyhow!("Failed to build API client (retry): {e}"))?;
                     let sync_api_client2 = MessageBackendBuilder::default()
+                        .cursor_store(SqliteCursorStore::new(store2.db()))
                         .v3_host(grpc_host)
                         .maybe_gateway_host(None::<String>)
                         .is_secure(is_secure)

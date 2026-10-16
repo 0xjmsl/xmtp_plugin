@@ -984,6 +984,12 @@ class XmtpPluginWeb extends XmtpPluginPlatform {
   }
 
   @override
+  Future<Map<String, bool>> staticCanMessage(List<String> addresses,
+      {String environment = 'production'}) async {
+    throw UnimplementedError('staticCanMessage is not available on web');
+  }
+
+  @override
   Future<void> staticDeleteLocalDatabase(String address, String inboxId,
       {String environment = 'production', String? dbDirectory}) async {
     throw UnimplementedError('staticDeleteLocalDatabase is not available on web');

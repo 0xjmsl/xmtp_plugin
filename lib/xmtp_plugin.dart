@@ -527,6 +527,28 @@ class XmtpPlugin {
     return XmtpPluginPlatform.instance.staticGetInboxIdForAddress(address, environment: environment);
   }
 
+  /// Is each address registered on the XMTP network (i.e. does it have an
+  /// inbox others can message)? Does NOT require an initialized client and
+  /// registers nothing: Android/iOS run the SDK's static `Client.canMessage`
+  /// on a throwaway unregistered client (no signature, no installation), and
+  /// Windows answers from the same network lookup as
+  /// [staticGetInboxIdForAddress].
+  ///
+  /// Keys of the returned map are the addresses as passed in.
+  ///
+  /// ⚠ Unlike [staticGetInboxIdForAddress], this DOES distinguish "no inbox":
+  /// that lookup falls back to a computed id on Android/iOS and so never
+  /// answers false. Added 2026-09-19 (publicos threads/tester_ui_notes_0913)
+  /// for the "activate this key" flow — only ask the user about a backup when
+  /// the key actually has an inbox to restore.
+  static Future<Map<String, bool>> staticCanMessage(
+    List<String> addresses, {
+    String environment = 'production',
+  }) async {
+    return XmtpPluginPlatform.instance
+        .staticCanMessage(addresses, environment: environment);
+  }
+
   /// Delete the local XMTP database files for a given address/inboxId.
   /// Each platform uses the parameters it needs to construct the DB path.
   /// Does NOT require an initialized client.

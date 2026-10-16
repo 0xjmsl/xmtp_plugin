@@ -603,6 +603,17 @@ class MethodChannelXmtpPlugin extends XmtpPluginPlatform {
   }
 
   @override
+  Future<Map<String, bool>> staticCanMessage(List<String> addresses,
+      {String environment = 'production'}) async {
+    final Map<dynamic, dynamic> result =
+        await methodChannel.invokeMethod('staticCanMessage', {
+      'addresses': addresses,
+      'environment': environment,
+    });
+    return result.map((k, v) => MapEntry(k as String, v as bool));
+  }
+
+  @override
   Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production', String? dbDirectory}) async {
     await methodChannel.invokeMethod('staticDeleteLocalDatabase', {
       'address': address,

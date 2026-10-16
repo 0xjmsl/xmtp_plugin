@@ -297,6 +297,11 @@ abstract class XmtpPluginPlatform extends PlatformInterface {
     throw UnimplementedError('staticGetInboxIdForAddress() has not been implemented.');
   }
 
+  Future<Map<String, bool>> staticCanMessage(List<String> addresses,
+      {String environment = 'production'}) {
+    throw UnimplementedError('staticCanMessage() has not been implemented.');
+  }
+
   Future<void> staticDeleteLocalDatabase(String address, String inboxId, {String environment = 'production', String? dbDirectory}) {
     throw UnimplementedError('staticDeleteLocalDatabase() has not been implemented.');
   }

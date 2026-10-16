@@ -1719,8 +1719,11 @@ class LeaveRequestCodec extends XMTPCodec {
   @override
   String get authorityId => 'xmtp.org';
 
+  // Canonical libxmtp id, snake_case (xmtp-ios LeaveRequestCodec / xmtp-android
+  // LeaveRequestCodec.kt). 'leaveRequest' silently missed the registry, so a
+  // real leave request decoded to a blank bubble. Fixed 2026-10-02.
   @override
-  String get typeId => 'leaveRequest';
+  String get typeId => 'leave_request';
 
   @override
   int get versionMajor => 1;
@@ -1758,16 +1761,87 @@ class LeaveRequestCodec extends XMTPCodec {
 
 // ============================================================================
 // Multi Remote Attachment — Protobuf wire format
-// (xmtp.org/multiRemoteStaticContent/1.0)
+// (xmtp.org/multiRemoteStaticAttachment/1.0)
 // ============================================================================
 
-/// Multi remote attachment codec — wraps the protobuf-generated MultiRemoteAttachment
+/// Several remote attachments in one message, plus an optional caption.
+///
+/// The wire body is the standard `MultiRemoteAttachment` proto (one
+/// `RemoteAttachmentInfo` per file). The caption is OUR addition, carried the
+/// same way single attachments carry theirs: an EncodedContent parameter named
+/// `description` that other XMTP clients ignore (2026-10-02,
+/// threads/multi_attachments). Each item is a plain [RemoteAttachmentContent],
+/// so consumers reuse the single-attachment download/decrypt/cache path.
+class MultiRemoteAttachmentContent {
+  final List<RemoteAttachmentContent> attachments;
+  final String? description;
+
+  MultiRemoteAttachmentContent({required this.attachments, this.description});
+
+  factory MultiRemoteAttachmentContent.fromProto(
+      proto_multi.MultiRemoteAttachment p,
+      {String? description}) {
+    return MultiRemoteAttachmentContent(
+      attachments: [
+        for (final a in p.attachments)
+          RemoteAttachmentContent(
+            url: a.url,
+            contentDigest: a.contentDigest,
+            secret: Uint8List.fromList(a.secret),
+            salt: Uint8List.fromList(a.salt),
+            nonce: Uint8List.fromList(a.nonce),
+            scheme: a.scheme,
+            contentLength: a.contentLength,
+            filename: a.filename,
+          ),
+      ],
+      description: (description == null || description.isEmpty) ? null : description,
+    );
+  }
+
+  proto_multi.MultiRemoteAttachment toProto() {
+    return proto_multi.MultiRemoteAttachment(
+      attachments: [
+        for (final a in attachments)
+          proto_multi.RemoteAttachmentInfo(
+            url: a.url,
+            contentDigest: a.contentDigest,
+            secret: a.secret,
+            salt: a.salt,
+            nonce: a.nonce,
+            scheme: a.scheme,
+            contentLength: a.contentLength,
+            filename: a.filename,
+          ),
+      ],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'attachments': [for (final a in attachments) a.toJson()],
+        if (description != null) 'description': description,
+      };
+
+  factory MultiRemoteAttachmentContent.fromJson(Map<String, dynamic> json) =>
+      MultiRemoteAttachmentContent(
+        attachments: [
+          for (final a in (json['attachments'] as List? ?? const []))
+            RemoteAttachmentContent.fromJson(Map<String, dynamic>.from(a as Map)),
+        ],
+        description: json['description'] as String?,
+      );
+}
+
+/// Multi remote attachment codec. Encodes/decodes [MultiRemoteAttachmentContent];
+/// a raw proto is still accepted on encode.
 class MultiRemoteAttachmentCodec extends XMTPCodec {
   @override
   String get authorityId => 'xmtp.org';
 
+  // Canonical libxmtp id (xmtp-ios MultiRemoteAttachmentCodec.swift:7).
+  // 'multiRemoteStaticContent' silently missed the registry. Fixed 2026-10-02.
   @override
-  String get typeId => 'multiRemoteStaticContent';
+  String get typeId => 'multiRemoteStaticAttachment';
 
   @override
   int get versionMajor => 1;
@@ -1777,19 +1851,32 @@ class MultiRemoteAttachmentCodec extends XMTPCodec {
 
   @override
   Future<Map<String, dynamic>> encode(dynamic content) async {
-    if (content is! proto_multi.MultiRemoteAttachment) {
-      throw const FormatException('Content must be MultiRemoteAttachment');
+    final proto_multi.MultiRemoteAttachment p;
+    String? description;
+    if (content is MultiRemoteAttachmentContent) {
+      p = content.toProto();
+      description = content.description;
+    } else if (content is proto_multi.MultiRemoteAttachment) {
+      p = content;
+    } else {
+      throw const FormatException('Content must be MultiRemoteAttachmentContent');
     }
     return {
-      'content': Uint8List.fromList(content.writeToBuffer()),
-      'parameters': <String, dynamic>{},
+      'content': Uint8List.fromList(p.writeToBuffer()),
+      'parameters': <String, dynamic>{
+        // Our caption extension, same parameter name as single attachments.
+        if (description != null && description.isNotEmpty) 'description': description,
+      },
     };
   }
 
   @override
-  Future<proto_multi.MultiRemoteAttachment> decode(EncodedContent encodedContent) async {
+  Future<MultiRemoteAttachmentContent> decode(EncodedContent encodedContent) async {
     try {
-      return proto_multi.MultiRemoteAttachment.fromBuffer(encodedContent.content);
+      return MultiRemoteAttachmentContent.fromProto(
+        proto_multi.MultiRemoteAttachment.fromBuffer(encodedContent.content),
+        description: encodedContent.parameters['description'],
+      );
     } catch (e) {
       throw FormatException('Failed to decode MultiRemoteAttachment: $e');
     }
@@ -1797,11 +1884,13 @@ class MultiRemoteAttachmentCodec extends XMTPCodec {
 
   @override
   String? getFallback(dynamic content) {
-    if (content is proto_multi.MultiRemoteAttachment) {
-      final count = content.attachments.length;
-      return '[$count attachment${count != 1 ? 's' : ''}]';
-    }
-    return null;
+    final int? count = content is MultiRemoteAttachmentContent
+        ? content.attachments.length
+        : content is proto_multi.MultiRemoteAttachment
+            ? content.attachments.length
+            : null;
+    if (count == null) return null;
+    return '[$count attachment${count != 1 ? 's' : ''}]';
   }
 
   @override

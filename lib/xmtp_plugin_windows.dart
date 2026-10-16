@@ -647,6 +647,24 @@ class XmtpPluginWindows extends XmtpPluginPlatform {
   }
 
   @override
+  Future<Map<String, bool>> staticCanMessage(List<String> addresses,
+      {String environment = 'production'}) async {
+    await _ensureInitialized();
+    // The Rust lookup IS the registration test here: `get_inbox_ids` returns
+    // null for an address the network has never seen (no compute fallback,
+    // unlike the mobile SDKs).
+    final out = <String, bool>{};
+    for (final address in addresses) {
+      final inboxId = await rust_client.staticGetInboxIdForAddress(
+        address: address,
+        environment: environment,
+      );
+      out[address] = inboxId != null && inboxId.isNotEmpty;
+    }
+    return out;
+  }
+
+  @override
   Future<void> staticDeleteLocalDatabase(String address, String inboxId,
       {String environment = 'production', String? dbDirectory}) async {
     // dbDirectory is iOS-only (App Group sharing); the Rust/Windows path
