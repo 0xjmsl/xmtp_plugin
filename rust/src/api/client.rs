@@ -121,9 +121,57 @@ fn local_db_path(address: &str) -> Result<std::path::PathBuf> {
     if address.len() < 10 {
         return Err(anyhow!("Invalid address: too short"));
     }
-    Ok(std::env::temp_dir()
-        .join("xmtp_plugin")
-        .join(format!("{}.db3", &address[2..10])))
+    let name = format!("{}.db3", &address[2..10]);
+    let dir = store_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    let db_path = dir.join(&name);
+    adopt_temp_store(&std::env::temp_dir().join("xmtp_plugin").join(&name), &db_path)?;
+    Ok(db_path)
+}
+
+/// The folder that holds the local XMTP stores: `%APPDATA%\xmtp_plugin` on
+/// Windows, `$HOME/.local/share/xmtp_plugin` elsewhere. It is a folder the
+/// system never cleans: a store that disappears costs the inbox one of its
+/// installation slots. Roaming rather than Local AppData on purpose: a packaged
+/// app's writes to Local AppData can be redirected, Roaming stays where it is.
+fn store_dir() -> Result<std::path::PathBuf> {
+    let base = match std::env::var_os("APPDATA").filter(|v| !v.is_empty()) {
+        Some(appdata) => std::path::PathBuf::from(appdata),
+        None => match std::env::var_os("HOME").filter(|v| !v.is_empty()) {
+            Some(home) => std::path::PathBuf::from(home).join(".local").join("share"),
+            None => return Err(anyhow!("No APPDATA or HOME: nowhere durable to keep the XMTP store")),
+        },
+    };
+    Ok(base.join("xmtp_plugin"))
+}
+
+/// Stores written before the store folder existed sit in the system temp
+/// folder. Move such a store (the .db3, its salt sidecar, WAL and SHM) to the
+/// store folder the first time its address is asked for. Nothing happens when
+/// the store folder already holds one, or when temp holds none.
+fn adopt_temp_store(old_db: &std::path::Path, new_db: &std::path::Path) -> Result<()> {
+    if new_db.exists() || !old_db.exists() || !salt_sidecar(old_db).exists() {
+        return Ok(());
+    }
+    // Salt first: a .db3 without its salt cannot be opened, the reverse is harmless.
+    let pairs = [
+        (salt_sidecar(old_db), salt_sidecar(new_db)),
+        (old_db.with_extension("db3-wal"), new_db.with_extension("db3-wal")),
+        (old_db.with_extension("db3-shm"), new_db.with_extension("db3-shm")),
+        (old_db.to_path_buf(), new_db.to_path_buf()),
+    ];
+    for (from, to) in pairs {
+        if !from.exists() {
+            continue;
+        }
+        if std::fs::rename(&from, &to).is_err() {
+            // Temp on another drive: copy, then remove the original.
+            std::fs::copy(&from, &to)
+                .map_err(|e| anyhow!("Could not move the XMTP store {from:?} to {to:?}: {e}"))?;
+            std::fs::remove_file(&from)?;
+        }
+    }
+    Ok(())
 }
 
 /// Whether a local XMTP database exists for the address.
@@ -304,9 +352,7 @@ pub async fn initialize_client(
         .try_into()
         .map_err(|_| anyhow!("DB encryption key must be exactly 32 bytes"))?;
 
-    let db_dir = std::env::temp_dir().join("xmtp_plugin");
-    std::fs::create_dir_all(&db_dir)?;
-    let db_path = db_dir.join(format!("{}.db3", &address[2..10]));
+    let db_path = local_db_path(&address)?;
     let storage_opt = StorageOption::Persistent(db_path.to_string_lossy().to_string());
 
     let db = NativeDb::new(&storage_opt, db_key)?;
